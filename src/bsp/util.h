@@ -19,36 +19,20 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef BSP_GCTL_H_
-#define BSP_GCTL_H_
+#ifndef BSP_UTIL_H_
+#define BSP_UTIL_H_
 
 #include <stdint.h>
 
-#ifndef PLL_FBDIV
-#define PLL_FBDIV 21  /* -> SYS_CLK = 403200000 */
+/* Pylance/MSVC parsing compatibility: allow GCC-style attributes in headers.
+ * The FX3 firmware is built with GCC/Clang where __attribute__ is supported.
+ */
+#if !defined(__GNUC__) && !defined(__clang__)
+#ifndef __attribute__
+#define __attribute__(x)
+#endif
 #endif
 
-#define SYS_CLK (19200000 * PLL_FBDIV)
+extern void Fx3UtilDelayUs(uint32_t delay_us);
 
-#ifndef CPU_DIV
-#define CPU_DIV 2
-#endif
-
-#define CPU_CLK   (SYS_CLK / CPU_DIV)
-
-
-/* Alternate function for GPIO 33-57 */
-typedef enum {
-  FX3_GCTL_ALTFUNC_GPIO = 0,
-  FX3_GCTL_ALTFUNC_GPIO_UART = 1,
-  FX3_GCTL_ALTFUNC_GPIO_SPI = 2,
-  FX3_GCTL_ALTFUNC_GPIO_I2S = 3,
-  FX3_GCTL_ALTFUNC_UART_SPI_I2S = 4,
-  FX3_GCTL_ALTFUNC_GPIF32BIT_UART_I2S = 5
-} Fx3GctlPinAltFunc_t;
-
-extern void Fx3GctlInitClock(void);
-extern void Fx3GctlInitIoMatrix(Fx3GctlPinAltFunc_t alt_func);
-extern void Fx3GctlHardReset(void);
-
-#endif /* BSP_GCTL_H_ */
+#endif /* BSP_UTIL_H_ */

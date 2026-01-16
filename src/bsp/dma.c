@@ -68,7 +68,7 @@ void Fx3DmaAbortSocket(uint32_t socket)
     ;
 }
 
-static void Fx3DmaFillDescriptor(uint16_t descriptor, uint32_t buffer,
+static void __attribute__((optimize("O3"))) Fx3DmaFillDescriptor(uint16_t descriptor, uint32_t buffer,
 				 uint32_t sync, uint32_t size,
 				 uint16_t wrchain, uint16_t rdchain)
 {
@@ -107,7 +107,7 @@ static void Fx3DmaTransferStart(uint32_t socket, uint16_t descriptor,
 	      FX3_SCK_STATUS_GO_ENABLE);
 }
 
-static void Fx3DmaWaitForEvent(uint32_t socket, uint32_t event)
+static void __attribute__((optimize("O3"))) Fx3DmaWaitForEvent(uint32_t socket, uint32_t event)
 {
   for(;;) {
     uint32_t status = Fx3ReadReg32(socket + FX3_SCK_INTR);
@@ -192,19 +192,86 @@ void Fx3DmaSimpleTransferWrite(uint32_t socket, uint16_t descriptor,
 void Fx3DmaStartProducer(uint32_t socket, uint16_t descriptor,
 			 uint32_t size, uint32_t count)
 {
-  Fx3DmaTransferStart(socket, descriptor,
-		      FX3_SCK_STATUS_SUSP_TRANS	|
-		      FX3_SCK_STATUS_EN_PROD_EVENTS |
-		      FX3_SCK_STATUS_TRUNCATE,
-		      size, count);
+  uint32_t status = FX3_SCK_STATUS_SUSP_TRANS | FX3_SCK_STATUS_EN_PROD_EVENTS;
+  if (size != 0 || count != 0)
+    status |= FX3_SCK_STATUS_TRUNCATE;
+
+  Fx3DmaTransferStart(socket, descriptor, status, size, count);
+}
+
+void Fx3DmaStartProducerBurst(uint32_t socket, uint16_t descriptor,
+			 uint32_t size, uint32_t count)
+{
+  uint32_t status = FX3_SCK_STATUS_SUSP_TRANS | FX3_SCK_STATUS_EN_PROD_EVENTS
+  	| FX3_SCK_STATUS_AVL_ENABLE;  /* Enable combining multiple buffers into burst */
+  if (size != 0 || count != 0)
+    status |= FX3_SCK_STATUS_TRUNCATE;
+
+  Fx3DmaTransferStart(socket, descriptor, status, size, count);
+}
+
+void Fx3DmaStartProducerBurstCount(uint32_t socket, uint16_t descriptor,
+				   uint32_t size, uint32_t count, uint32_t buffer_count)
+{
+  uint32_t avl_count = buffer_count;
+  if (avl_count == 0)
+    avl_count = 1;
+  if (avl_count > 31)
+    avl_count = 31;
+
+  uint32_t status = FX3_SCK_STATUS_SUSP_TRANS |
+		    FX3_SCK_STATUS_EN_PROD_EVENTS |
+		    FX3_SCK_STATUS_AVL_ENABLE |
+		    ((avl_count << FX3_SCK_STATUS_AVL_COUNT_SHIFT) & FX3_SCK_STATUS_AVL_COUNT_MASK);
+
+  if (size != 0 || count != 0)
+    status |= FX3_SCK_STATUS_TRUNCATE;
+
+  Fx3DmaTransferStart(socket, descriptor, status, size, count);
 }
 
 void Fx3DmaStartConsumer(uint32_t socket, uint16_t descriptor,
 			 uint32_t size, uint32_t count)
 {
-  Fx3DmaTransferStart(socket, descriptor,
-		      FX3_SCK_STATUS_SUSP_TRANS	|
-		      FX3_SCK_STATUS_EN_CONS_EVENTS |
-		      FX3_SCK_STATUS_TRUNCATE,
-		      size, count);
+  /* For infinite transfers (size=0, count=0), TRUNCATE must be cleared */
+  uint32_t status = FX3_SCK_STATUS_SUSP_TRANS | FX3_SCK_STATUS_EN_CONS_EVENTS;
+  if (size != 0 || count != 0)
+    status |= FX3_SCK_STATUS_TRUNCATE;
+
+  Fx3DmaTransferStart(socket, descriptor, status, size, count);
+}
+
+void Fx3DmaStartConsumerBurst(uint32_t socket, uint16_t descriptor,
+			      uint32_t size, uint32_t count)
+{
+  /* For infinite transfers (size=0, count=0), TRUNCATE must be cleared */
+  uint32_t status = FX3_SCK_STATUS_SUSP_TRANS |
+		    FX3_SCK_STATUS_EN_CONS_EVENTS |
+		    FX3_SCK_STATUS_AVL_ENABLE;  /* Enable combining multiple buffers into burst */
+  if (size != 0 || count != 0)
+    status |= FX3_SCK_STATUS_TRUNCATE;
+
+  Fx3DmaTransferStart(socket, descriptor, status, size, count);
+}
+
+
+void Fx3DmaStartConsumerBurstCount(uint32_t socket, uint16_t descriptor,
+			      uint32_t size, uint32_t count, uint32_t buffer_count)
+{
+  uint32_t avl_count = buffer_count;
+  if (avl_count == 0)
+    avl_count = 1;
+  if (avl_count > 31)
+    avl_count = 31;
+
+  uint32_t status = FX3_SCK_STATUS_SUSP_TRANS |
+		    FX3_SCK_STATUS_EN_CONS_EVENTS |
+		    FX3_SCK_STATUS_AVL_ENABLE |
+		    ((avl_count << FX3_SCK_STATUS_AVL_COUNT_SHIFT) & FX3_SCK_STATUS_AVL_COUNT_MASK);
+
+  /* Only set TRUNCATE for finite transfers */
+  if (size != 0 || count != 0)
+    status |= FX3_SCK_STATUS_TRUNCATE;
+
+  Fx3DmaTransferStart(socket, descriptor, status, size, count);
 }

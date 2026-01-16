@@ -14,14 +14,14 @@ static const struct __attribute__((packed)) {
 } highspeed_device_descriptor = {
   .length = sizeof(highspeed_device_descriptor),
   .descriptor_type = FX3_USB_DESCRIPTOR_DEVICE,
-  .usb_version = 0x0200,
-  .device_class = 0xff,
-  .sub_class = 0xff,
-  .protocol = 0xff,
-  .max_packet_size = 64 /* 2^9 */,
+  .usb_version = 0x0210,   /* USB 2.1 - BOS required, but LPM disabled */
+  .device_class = 0x00,    /* Defined at interface level */
+  .sub_class = 0x00,
+  .protocol = 0x00,
+  .max_packet_size = 64,
   .vendor = 0x04b4,
-  .product = 0x00f3,
-  .dev_version = 0x0001,
+  .product = 0x1337,
+  .dev_version = 0x0100,
   .manuf_index = 1,
   .product_index = 2,
   .serial_index = 3,
@@ -47,11 +47,7 @@ static const struct __attribute__((packed)) {
     uint16_t max_packet_size;
     uint8_t interval;
   } endpoints[1];
-  struct __attribute__((packed)) {
-    uint8_t length, descriptor_type;
-    uint8_t max_burst, max_streams;
-    uint16_t service_interval;
-  } companions[1];
+  /* No SS endpoint companion for HighSpeed */
 } highspeed_configuration_descriptor = {
   .configuration = {
       .length = sizeof(highspeed_configuration_descriptor.configuration),
@@ -61,7 +57,7 @@ static const struct __attribute__((packed)) {
       .configuration_value = 1,
       .configuration_string = 0,
       .attributes = 0x80,
-      .max_power = 100/2
+      .max_power = 0x32    /* 100mA in 2mA units */
     },
   .interfaces[0] = {
      .length = sizeof(highspeed_configuration_descriptor.interfaces[0]),
@@ -69,9 +65,9 @@ static const struct __attribute__((packed)) {
      .interface_number = 0,
      .alternate_setting = 0,
      .num_endpoints = 1,
-     .interface_class = 0xff,
-     .interface_subclass = 0xff,
-     .interface_protocol = 0xff,
+     .interface_class = 0xff,    /* Vendor-specific */
+     .interface_subclass = 0x00,
+     .interface_protocol = 0x00,
      .interface_string = 0
    },
   .endpoints[0] = {
@@ -81,13 +77,6 @@ static const struct __attribute__((packed)) {
      .attributes = 2 /* Bulk */,
      .max_packet_size = 512,
      .interval = 0
-   },
-  .companions[0] = {
-     .length = sizeof(highspeed_configuration_descriptor.companions[0]),
-     .descriptor_type = FX3_USB_DESCRIPTOR_SS_EP_COMPANION,
-     .max_burst = 0,
-     .max_streams = 0,
-     .service_interval = 0
    },
 };
 
@@ -100,14 +89,14 @@ static const struct __attribute__((packed)) {
 } superspeed_device_descriptor = {
   .length = sizeof(superspeed_device_descriptor),
   .descriptor_type = FX3_USB_DESCRIPTOR_DEVICE,
-  .usb_version = 0x0300,
-  .device_class = 0xff,
-  .sub_class = 0xff,
-  .protocol = 0xff,
-  .max_packet_size = 9 /* 2^9 */,
+  .usb_version = 0x0300,   /* USB 3.2 Gen 1 (5Gbps) */
+  .device_class = 0x00,    /* Defined at interface level */
+  .sub_class = 0x00,
+  .protocol = 0x00,
+  .max_packet_size = 9,    /* 2^9 = 512 bytes for SuperSpeed EP0 */
   .vendor = 0x04b4,
-  .product = 0x00f3,
-  .dev_version = 0x0001,
+  .product = 0x1337,
+  .dev_version = 0x0100,
   .manuf_index = 1,
   .product_index = 2,
   .serial_index = 3,
@@ -147,7 +136,7 @@ static const struct __attribute__((packed)) {
       .configuration_value = 1,
       .configuration_string = 0,
       .attributes = 0x80,
-      .max_power = 100/2
+      .max_power = 0x7d    /* 1000mA in 8mA units (SuperSpeed) */
     },
   .interfaces[0] = {
      .length = sizeof(superspeed_configuration_descriptor.interfaces[0]),
@@ -155,9 +144,9 @@ static const struct __attribute__((packed)) {
      .interface_number = 0,
      .alternate_setting = 0,
      .num_endpoints = 1,
-     .interface_class = 0xff,
-     .interface_subclass = 0xff,
-     .interface_protocol = 0xff,
+     .interface_class = 0xff,    /* Vendor-specific */
+     .interface_subclass = 0x00,
+     .interface_protocol = 0x00,
      .interface_string = 0
    },
   .endpoints[0] = {
@@ -171,7 +160,7 @@ static const struct __attribute__((packed)) {
   .companions[0] = {
      .length = sizeof(superspeed_configuration_descriptor.companions[0]),
      .descriptor_type = FX3_USB_DESCRIPTOR_SS_EP_COMPANION,
-     .max_burst = 0,
+     .max_burst = 15,  /* 16 packets per burst (max_burst + 1) */
      .max_streams = 0,
      .service_interval = 0
    },
@@ -185,12 +174,12 @@ static const struct __attribute__((packed)) {
   } bos;
   struct __attribute__((packed)) {
     uint8_t length, descriptor_type;
-    uint8_t usb_version;
-    uint32_t features;
+    uint8_t capability_type;
+    uint32_t attributes;
   } usb2_caps;
   struct __attribute__((packed)) {
     uint8_t length, descriptor_type;
-    uint8_t usb_version;
+    uint8_t capability_type;
     uint8_t dev_features;
     uint16_t speeds;
     uint8_t functionality;
@@ -207,25 +196,26 @@ static const struct __attribute__((packed)) {
   .usb2_caps = {
       .length = sizeof(bos_descriptor.usb2_caps),
       .descriptor_type = FX3_USB_DESCRIPTOR_DEV_CAPABILITY,
-      .usb_version = 2,
-      .features = 2 /* LPM support */
+      .capability_type = 2,  /* USB 2.0 Extension */
+      .attributes = 0x00000000  /* No LPM support - power management disabled */
    },
   .usb3_caps = {
       .length = sizeof(bos_descriptor.usb3_caps),
       .descriptor_type = FX3_USB_DESCRIPTOR_DEV_CAPABILITY,
-      .usb_version = 3,
+      .capability_type = 3,  /* SuperSpeed USB */
       .dev_features = 0,
-      .speeds = 0xe /* SS, HS, FS */,
+      .speeds = 0x0e,  /* SS, HS, FS supported */
       .functionality = 3,
-      .u1_exit_latency = 0,
-      .u2_exit_latency = 0
+      .u1_exit_latency = 0,      /* 0 = U1 not supported */
+      .u2_exit_latency = 0       /* 0 = U2 not supported */
    },
 };
 
+// uint16_t strings are UTF-16LE encoded
 static const uint16_t * const string_descriptors[] = {
   [0] = u"\x0304" "\x0409", /* US english only */
-  [1] = u"\x030e" "sigrok",
-  [2] = u"\x0310" "fx3lafw",
+  [1] = u"\x0310" "OpenFX3",
+  [2] = u"\x0310" "OpenFX3",
   [3] = u"\x0312" "12345678",
 };
 
@@ -251,6 +241,7 @@ const void *GetDescriptor(uint8_t descriptor_type, uint8_t descriptor_no, Fx3Usb
       return string_descriptors[descriptor_no];
     break;
   case FX3_USB_DESCRIPTOR_BOS:
+    /* BOS required for both USB 2.1 and SuperSpeed */
     if (descriptor_no == 0)
       return &bos_descriptor;
     break;

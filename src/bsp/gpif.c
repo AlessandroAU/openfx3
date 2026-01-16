@@ -25,41 +25,44 @@
 #include <bsp/util.h>
 #include <bsp/uart.h>
 #include <rdb/gctl.h>
+#include <rdb/gpif.h>
 #include <rdb/pib.h>
 #include <rdb/vic.h>
+#include <stdio.h>
 
-static void Fx3GpifPibIsr(void) __attribute__ ((isr ("IRQ")));
+/* GPIF/PIB error counter - exported for stats reporting */
+volatile uint32_t gpif_error_count = 0;
+
+static void Fx3GpifPibIsr(void) __attribute__ ((isr ("IRQ"), optimize("O3")));
 
 static void Fx3GpifPibIsr(void)
 {
-  uint32_t req = Fx3ReadReg32(FX3_PIB_INTR) & Fx3ReadReg32(FX3_PIB_INTR_MASK);
-  Fx3WriteReg32(FX3_PIB_INTR, req);
+  /* Check for actual errors before clearing */
+  uint32_t pib_intr = Fx3ReadReg32(FX3_PIB_INTR);
+  uint32_t pib_error = Fx3ReadReg32(FX3_PIB_ERROR);
 
-  Fx3UartTxString("Fx3GpifPibIsr\n");
-
-  if (req & FX3_PIB_INTR_GPIF_ERR) {
-    Fx3UartTxString("  GPIF ERROR\n");
-    /* Pause on error */
-    Fx3SetReg32(FX3_GPIF_WAVEFORM_CTRL_STAT, FX3_GPIF_WAVEFORM_CTRL_STAT_PAUSE);
+  /* Count GPIF or PIB errors */
+  if (pib_intr & (FX3_PIB_INTR_GPIF_ERR | FX3_PIB_INTR_PIB_ERR)) {
+    gpif_error_count++;
   }
 
-  if (req & FX3_PIB_INTR_GPIF_INTERRUPT) {
-    Fx3UartTxString("  GPIF\n");
-    uint32_t gpif_req = Fx3ReadReg32(FX3_GPIF_INTR) & Fx3ReadReg32(FX3_GPIF_INTR_MASK);
-    Fx3WriteReg32(FX3_GPIF_INTR, gpif_req);
+  /* Clear all PIB/GPIF interrupts and errors */
+  Fx3WriteReg32(FX3_PIB_INTR, pib_intr);
+  Fx3WriteReg32(FX3_PIB_ERROR, pib_error);
+  Fx3WriteReg32(FX3_GPIF_INTR, Fx3ReadReg32(FX3_GPIF_INTR));
 
-    if (gpif_req & FX3_GPIF_INTR_GPIF_INTR)
-      Fx3UartTxString("    INTR\n");
-    if (gpif_req & FX3_GPIF_INTR_GPIF_DONE)
-      Fx3UartTxString("    DONE\n");
-  }
-
+  /* EOI */
   Fx3WriteReg32(FX3_VIC_ADDRESS, 0);
 }
 
 
 void Fx3GpifStart(uint8_t state, uint8_t alpha)
 {
+  {
+    char _start_dbg[128];
+    snprintf(_start_dbg, sizeof(_start_dbg), "Fx3GpifStart: state=%u alpha=%u\n", (unsigned)state, (unsigned)alpha);
+    Fx3UartTxString(_start_dbg);
+  }
   Fx3WriteReg32(FX3_GPIF_INTR, Fx3ReadReg32(FX3_GPIF_INTR));
   Fx3WriteReg32(FX3_GPIF_INTR_MASK,
 		FX3_GPIF_INTR_MASK_GPIF_INTR | FX3_GPIF_INTR_MASK_GPIF_DONE);
@@ -76,6 +79,7 @@ void Fx3GpifStart(uint8_t state, uint8_t alpha)
   Fx3SetReg32(FX3_GPIF_WAVEFORM_SWITCH,
 	      FX3_GPIF_WAVEFORM_SWITCH_SWITCH_NOW |
 	      FX3_GPIF_WAVEFORM_SWITCH_WAVEFORM_SWITCH);
+  Fx3UartTxString("Fx3GpifStart: waveform switch requested\n");
 }
 
 void Fx3GpifStop(void)
@@ -164,6 +168,11 @@ void Fx3GpifConfigureCompat(const Fx3GpifWaveformCompat_t *waveforms,
 
 void Fx3GpifPibStart(uint16_t clock_divisor_x2)
 {
+  {
+    char _gpif_dbg[128];
+    snprintf(_gpif_dbg, sizeof(_gpif_dbg), "Fx3GpifPibStart: clock_divisor_x2=%u\n", (unsigned)clock_divisor_x2);
+    Fx3UartTxString(_gpif_dbg);
+  }
   Fx3WriteReg32(FX3_GCTL_PIB_CORE_CLK,
 		(((clock_divisor_x2 >> 1)-1) << FX3_GCTL_PIB_CORE_CLK_DIV_SHIFT) |
 		(3UL << FX3_GCTL_PIB_CORE_CLK_SRC_SHIFT));
@@ -177,23 +186,42 @@ void Fx3GpifPibStart(uint16_t clock_divisor_x2)
   while(!(Fx3ReadReg32(FX3_PIB_POWER) & FX3_PIB_POWER_ACTIVE))
     ;
 
-  Fx3ClearReg32(FX3_PIB_DLL_CTRL, FX3_PIB_DLL_CTRL_ENABLE);
-  Fx3UtilDelayUs(1);
-  Fx3WriteReg32(FX3_PIB_DLL_CTRL,
-		(clock_divisor_x2<11? FX3_PIB_DLL_CTRL_HIGH_FREQ : 0UL) |
-		FX3_PIB_DLL_CTRL_ENABLE);
-  Fx3UtilDelayUs(1);
-  Fx3ClearReg32(FX3_PIB_DLL_CTRL, FX3_PIB_DLL_CTRL_DLL_RESET_N);
-  Fx3UtilDelayUs(1);
-  Fx3SetReg32(FX3_PIB_DLL_CTRL, FX3_PIB_DLL_CTRL_DLL_RESET_N);
-  Fx3UtilDelayUs(1);
-  while(!(Fx3ReadReg32(FX3_PIB_DLL_CTRL) & FX3_PIB_DLL_CTRL_DLL_STAT))
-    ;
+  /* DLL frequency limits per Infineon docs:
+   * - HIGH_FREQ=1: 70-230 MHz
+   * - HIGH_FREQ=0: 23-80 MHz
+   *
+   * The DLL helps with clock/data alignment but appears to cause sporadic
+   * data corruption at certain frequencies. Only enable DLL for high-speed
+   * operation (>70 MHz) where it's most beneficial and well-characterized.
+   *
+   * With sys_clk ~480MHz: div_x2=14 gives ~69MHz (boundary for HIGH_FREQ)
+   */
+  if (clock_divisor_x2 <= 14) {
+    /* High frequency (>~70 MHz) - enable DLL with HIGH_FREQ=1 */
+    Fx3ClearReg32(FX3_PIB_DLL_CTRL, FX3_PIB_DLL_CTRL_ENABLE);
+    Fx3UtilDelayUs(1);
+    Fx3WriteReg32(FX3_PIB_DLL_CTRL,
+		  FX3_PIB_DLL_CTRL_HIGH_FREQ | FX3_PIB_DLL_CTRL_ENABLE);
+    Fx3UtilDelayUs(1);
+    Fx3ClearReg32(FX3_PIB_DLL_CTRL, FX3_PIB_DLL_CTRL_DLL_RESET_N);
+    Fx3UtilDelayUs(1);
+    Fx3SetReg32(FX3_PIB_DLL_CTRL, FX3_PIB_DLL_CTRL_DLL_RESET_N);
+    Fx3UtilDelayUs(1);
+    while(!(Fx3ReadReg32(FX3_PIB_DLL_CTRL) & FX3_PIB_DLL_CTRL_DLL_STAT))
+      ;
+    Fx3UartTxString("Fx3GpifPibStart: DLL locked (HIGH_FREQ)\n");
+  } else {
+    /* Lower frequencies - disable DLL to avoid timing issues */
+    Fx3WriteReg32(FX3_PIB_DLL_CTRL, 0);
+    Fx3UartTxString("Fx3GpifPibStart: DLL disabled\n");
+  }
 
   Fx3WriteReg32(FX3_VIC_VEC_ADDRESS + (FX3_IRQ_GPIF_CORE<<2), Fx3GpifPibIsr);
   Fx3WriteReg32(FX3_PIB_INTR, Fx3ReadReg32(FX3_PIB_INTR));
+  /* Enable GPIF error, GPIF interrupt, and DLL lock loss interrupts */
   Fx3WriteReg32(FX3_PIB_INTR_MASK, FX3_PIB_INTR_MASK_GPIF_ERR |
-		FX3_PIB_INTR_MASK_GPIF_INTERRUPT);
+		FX3_PIB_INTR_MASK_GPIF_INTERRUPT |
+		FX3_PIB_INTR_MASK_DLL_LOST_LOCK);
   Fx3WriteReg32(FX3_VIC_INT_ENABLE, (1UL << FX3_IRQ_GPIF_CORE));
 }
 
@@ -206,6 +234,40 @@ void Fx3GpifPibStop(void)
   Fx3WriteReg32(FX3_PIB_POWER, 0UL);
   Fx3UtilDelayUs(10);
   Fx3ClearReg32(FX3_GCTL_PIB_CORE_CLK, FX3_GCTL_PIB_CORE_CLK_CLK_EN);
+}
+
+void Fx3GpifSetClock(uint16_t clock_divisor_x2)
+{
+  /* Update PIB clock divider without full restart.
+   * This allows changing frequency while GPIF is running. */
+
+  /* Calculate new clock register value (preserve CLK_EN and SRC bits) */
+  uint32_t clk_reg = (((clock_divisor_x2 >> 1)-1) << FX3_GCTL_PIB_CORE_CLK_DIV_SHIFT) |
+                     (3UL << FX3_GCTL_PIB_CORE_CLK_SRC_SHIFT) |
+                     FX3_GCTL_PIB_CORE_CLK_CLK_EN;
+  if (clock_divisor_x2 & 1)
+    clk_reg |= FX3_GCTL_PIB_CORE_CLK_HALFDIV;
+
+  Fx3WriteReg32(FX3_GCTL_PIB_CORE_CLK, clk_reg);
+
+  /* Re-configure DLL for new frequency if needed */
+  if (clock_divisor_x2 <= 14) {
+    /* High frequency (>~70 MHz) - enable DLL with HIGH_FREQ=1 */
+    Fx3ClearReg32(FX3_PIB_DLL_CTRL, FX3_PIB_DLL_CTRL_ENABLE);
+    Fx3UtilDelayUs(1);
+    Fx3WriteReg32(FX3_PIB_DLL_CTRL,
+                  FX3_PIB_DLL_CTRL_HIGH_FREQ | FX3_PIB_DLL_CTRL_ENABLE);
+    Fx3UtilDelayUs(1);
+    Fx3ClearReg32(FX3_PIB_DLL_CTRL, FX3_PIB_DLL_CTRL_DLL_RESET_N);
+    Fx3UtilDelayUs(1);
+    Fx3SetReg32(FX3_PIB_DLL_CTRL, FX3_PIB_DLL_CTRL_DLL_RESET_N);
+    Fx3UtilDelayUs(1);
+    while(!(Fx3ReadReg32(FX3_PIB_DLL_CTRL) & FX3_PIB_DLL_CTRL_DLL_STAT))
+      ;
+  } else {
+    /* Lower frequencies - disable DLL */
+    Fx3WriteReg32(FX3_PIB_DLL_CTRL, 0);
+  }
 }
 
 Fx3GpifStat_t Fx3GpifGetStat(uint8_t *current_state)

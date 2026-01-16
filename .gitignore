@@ -1,9 +1,36 @@
+# Build directory
+build/
+
+# Compiled executables (host examples copied to root)
+*.exe
+
+# Object files and dependencies
 *.o
 *.d
+
+# Firmware artifacts
 *.elf
 *.map
-*.img
-*.out
 *.fw
+*.img
+
+# Static libraries
+*.a
+
+# Generated firmware header
+lib/src/firmware.h
+
+# Editor/IDE
 tags
-*gitignore
+*.swp
+*~
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db

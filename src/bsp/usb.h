@@ -50,6 +50,8 @@
 #define FX3_USB_STD_REQUEST_GET_INTERFACE     0x0A
 #define FX3_USB_STD_REQUEST_SET_INTERFACE     0x0B
 #define FX3_USB_STD_REQUEST_SYNCH_FRAME       0x0C
+#define FX3_USB_STD_REQUEST_SET_SEL           0x30  /* USB 3.0: Set System Exit Latency */
+#define FX3_USB_STD_REQUEST_SET_ISOCH_DELAY   0x31  /* USB 3.0: Set Isochronous Delay */
 
 #define FX3_USB_DESCRIPTOR_DEVICE             0x01
 #define FX3_USB_DESCRIPTOR_CONFIGURATION      0x02
@@ -94,7 +96,10 @@ extern void Fx3UsbDmaDataOut(uint8_t ep, volatile void *buffer,
 extern void Fx3UsbDmaDataIn(uint8_t ep, const volatile void *buffer,
 			    uint16_t length);
 extern void Fx3UsbEnableInEndpoint(uint8_t ep, Fx3UsbEndpointType_t type,
-				   uint16_t pktsize);
+				   uint16_t pktsize, uint8_t burst_len);
 extern void Fx3UsbFlushInEndpoint(uint8_t ep);
+extern void Fx3UsbSetEpNak(uint8_t ep, uint8_t nak);
+extern void Fx3UsbResetEpDataToggle(uint8_t ep);
+extern void Fx3UsbSetEpBurstMode(uint8_t ep, uint8_t enable); // don't know if works
 
 #endif /* BSP_USB_H_ */

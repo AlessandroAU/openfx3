@@ -54,6 +54,9 @@ extern void Fx3DmaAbortSocket(uint32_t socket);
 extern void Fx3DmaFillDescriptorThrough(uint32_t prod_socket, uint32_t cons_socket,
 					uint16_t descriptor, volatile void *buffer, uint16_t length,
 					uint16_t wrchain, uint16_t rdchain);
+extern void Fx3DmaFillDescriptorThroughManual(uint32_t prod_socket, uint32_t cons_socket,
+					      uint16_t descriptor, volatile void *buffer, uint16_t length,
+					      uint16_t wrchain, uint16_t rdchain);
 extern void Fx3DmaFillDescriptorRead(uint32_t socket, uint16_t descriptor,
 				     const volatile void *buffer,
 				     uint16_t length, uint16_t chain);
@@ -66,8 +69,19 @@ extern void Fx3DmaSimpleTransferWrite(uint32_t socket, uint16_t descriptor,
 				      volatile void *buffer, uint16_t length);
 extern void Fx3DmaStartProducer(uint32_t socket, uint16_t descriptor,
 				uint32_t size, uint32_t count);
+extern void Fx3DmaStartProducerBurstCount(uint32_t socket, uint16_t descriptor,
+				uint32_t size, uint32_t count, uint32_t buffer_count);
+extern void Fx3DmaStartProducerThrough(uint32_t socket, uint16_t descriptor,
+				       uint32_t size, uint32_t count);
 extern void Fx3DmaStartConsumer(uint32_t socket, uint16_t descriptor,
 				uint32_t size, uint32_t count);
-
-
+extern void Fx3DmaStartConsumerBurst(uint32_t socket, uint16_t descriptor,
+				     uint32_t size, uint32_t count);
+extern void Fx3DmaStartProducerAuto(uint32_t socket, uint16_t descriptor);
+extern void Fx3DmaStartConsumerBurstAuto(uint32_t socket, uint16_t descriptor);
+extern void Fx3DmaStartConsumerAuto(uint32_t socket, uint16_t descriptor);
+extern void Fx3DmaStartConsumerBurstCount(uint32_t socket, uint16_t descriptor,
+			      uint32_t size, uint32_t count, uint32_t buffer_count);
+extern void Fx3DmaStartProducerBurst(uint32_t socket, uint16_t descriptor,
+			      uint32_t size, uint32_t count);
 #endif /* BSP_DMA_H_ */

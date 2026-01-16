@@ -33,7 +33,7 @@
 static const struct Fx3UsbCallbacks *Fx3UsbUserCallbacks = NULL;
 
 static void Fx3UsbGctlCoreIsr(void) __attribute__ ((isr ("IRQ")));
-static void Fx3UsbUsbCoreIsr(void) __attribute__ ((isr ("IRQ")));
+static void Fx3UsbUsbCoreIsr(void) __attribute__ ((isr ("IRQ"), optimize("O3")));
 static void Fx3UsbGctlPowerIsr(void) __attribute__ ((isr ("IRQ")));
 
 static void Fx3UsbWritePhyReg(uint16_t phy_addr, uint16_t phy_val)
@@ -143,10 +143,34 @@ static void Fx3UsbConnectHighSpeed(void)
 	Fx3SetReg32(FX3_GCTL_UIB_CORE_CLK, FX3_GCTL_UIB_CORE_CLK_CLK_EN);
 	Fx3UtilDelayUs(5);
 
+	/* Reset EPM mux for clean state transition to USB 2.0 */
+	Fx3SetReg32(FX3_IEPM_CS,
+		FX3_IEPM_CS_EPM_MUX_RESET |
+		FX3_IEPM_CS_EPM_FLUSH);
+	Fx3UtilDelayUs(1);
+	Fx3ClearReg32(FX3_IEPM_CS,
+		FX3_IEPM_CS_EPM_MUX_RESET |
+		FX3_IEPM_CS_EPM_FLUSH);
+	Fx3UtilDelayUs(1);
+
+	/* Configure endpoint manager for USB 2.0 (64-byte EP0 packets) */
+	Fx3WriteReg32(FX3_EEPM_ENDPOINT+0,
+		(64UL << FX3_EEPM_ENDPOINT_PACKET_SIZE_SHIFT));
+	Fx3WriteReg32(FX3_IEPM_ENDPOINT+0,
+		(64UL << FX3_IEPM_ENDPOINT_PACKET_SIZE_SHIFT));
+
+	/* Re-enable EP0 for USB 2.0 with proper configuration */
+	Fx3WriteReg32(FX3_DEV_EPI_CS+0,
+		FX3_DEV_EPI_CS_VALID |
+		(0UL << FX3_DEV_EPI_CS_TYPE_SHIFT) |
+		(64UL << FX3_DEV_EPI_CS_PAYLOAD_SHIFT));
+	Fx3WriteReg32(FX3_DEV_EPO_CS+0,
+		FX3_DEV_EPO_CS_VALID |
+		(0UL << FX3_DEV_EPO_CS_TYPE_SHIFT) |
+		(64UL << FX3_DEV_EPO_CS_PAYLOAD_SHIFT));
+
 	/* For USB 2.0 connections, enable pull-up on D+ pin. */
         Fx3ClearReg32(FX3_DEV_PWR_CS, (1UL << 3));
-
-
 }
 
 static void Fx3UsbConnectSuperSpeed(void)
@@ -198,8 +222,7 @@ static void Fx3UsbEnablePhy(void)
 		FX3_LNK_INTR_MASK_LTSSM_RESET |
 		FX3_LNK_INTR_MASK_LTSSM_DISCONNECT |
 		FX3_LNK_INTR_MASK_LTSSM_CONNECT |
-		FX3_LNK_INTR_MASK_LGO_U3 |
-		FX3_LNK_INTR_MASK_LTSSM_STATE_CHG);
+		FX3_LNK_INTR_MASK_LGO_U3);
   Fx3WriteReg32(FX3_PROT_EP_INTR_MASK, 0);
   Fx3WriteReg32(FX3_PROT_INTR, ~0UL);
   Fx3WriteReg32(FX3_PROT_INTR_MASK,
@@ -226,10 +249,8 @@ static void Fx3UsbEnablePhy(void)
   Fx3WriteReg32(FX3_VIC_INT_ENABLE, (1UL << FX3_IRQ_USB_CORE));
   Fx3SetReg32(FX3_GCTL_CONTROL, FX3_GCTL_CONTROL_USB_POWER_EN);
 
-  /* Setup LNK for superspeed */
-  Fx3WriteReg32(FX3_LNK_DEVICE_POWER_CONTROL,
-		FX3_LNK_DEVICE_POWER_CONTROL_AUTO_U2 |
-		FX3_LNK_DEVICE_POWER_CONTROL_AUTO_U1);
+  /* Setup LNK for superspeed - disable U1/U2 for better compatibility */
+  Fx3WriteReg32(FX3_LNK_DEVICE_POWER_CONTROL, 0);
   Fx3WriteReg32(0xe003309c, 10000);
   Fx3WriteReg32(0xe0033080, 10000);
   Fx3WriteReg32(0xe0033084, 0x00fa004b);
@@ -346,18 +367,17 @@ static void Fx3UsbUsbCoreIsr(void)
   uint32_t req = Fx3ReadReg32(FX3_UIB_INTR) & Fx3ReadReg32(FX3_UIB_INTR_MASK);
   Fx3WriteReg32(FX3_UIB_INTR, req);
 
-  Fx3UartTxString("Fx3UsbUsbCoreIsr\n");
   if (req & FX3_UIB_INTR_PROT_INT) {
-    Fx3UartTxString("  PROT\n");
+    //Fx3UartTxString("  PROT\n");
     uint32_t prot_req =
       Fx3ReadReg32(FX3_PROT_INTR) & Fx3ReadReg32(FX3_PROT_INTR_MASK);
     Fx3WriteReg32(FX3_PROT_INTR, prot_req);
 
     if (prot_req & FX3_PROT_INTR_STATUS_STAGE) {
-      Fx3UartTxString("    STATUS_STAGE\n");
+      //Fx3UartTxString("    STATUS_STAGE\n");
     }
     if (prot_req & FX3_PROT_INTR_SUTOK_EV) {
-      Fx3UartTxString("    SUTOK_EV\n");
+      //Fx3UartTxString("    SUTOK_EV\n");
       Fx3WriteReg32(FX3_PROT_EPO_CS1 + 0, FX3_PROT_EPO_CS1_VALID);
       Fx3WriteReg32(FX3_PROT_EPI_CS1 + 0, FX3_PROT_EPI_CS1_VALID);
 
@@ -406,10 +426,15 @@ static void Fx3UsbUsbCoreIsr(void)
     }
   }
   if (req & FX3_UIB_INTR_LNK_INT) {
-    Fx3UartTxString("  LNK\n");
     uint32_t lnk_req =
       Fx3ReadReg32(FX3_LNK_INTR) & Fx3ReadReg32(FX3_LNK_INTR_MASK);
     Fx3WriteReg32(FX3_LNK_INTR, lnk_req);
+
+    /* Only print LNK header if there's something meaningful (not just STATE_CHG) */
+    uint32_t meaningful = lnk_req & ~FX3_LNK_INTR_LTSSM_STATE_CHG;
+    if (meaningful) {
+      Fx3UartTxString("  LNK\n");
+    }
 
     if (lnk_req & FX3_LNK_INTR_LTSSM_RESET) {
       Fx3UartTxString("    LTSSM_RESET\n");
@@ -425,9 +450,7 @@ static void Fx3UsbUsbCoreIsr(void)
     if (lnk_req & FX3_LNK_INTR_LGO_U3) {
       Fx3UartTxString("    LGO_U3\n");
     }
-    if (lnk_req & FX3_LNK_INTR_LTSSM_STATE_CHG) {
-      Fx3UartTxString("    LTSSM_STATE_CHG %u\n");
-    }
+    /* LTSSM_STATE_CHG is intentionally not printed - too noisy */
   }
   if (req & FX3_UIB_INTR_DEV_CTL_INT) {
 	Fx3UartTxString("  DEV_CTL\n");
@@ -469,8 +492,15 @@ static void Fx3UsbUsbCoreIsr(void)
 	{
 		Fx3WriteReg32(FX3_DEV_CTRL_INTR, (1UL << 6));
 		Fx3UartTxString("    sudav\n");
-		Fx3WriteReg32(FX3_DEV_EPO_CS + 0, FX3_DEV_EPO_CS_VALID);
-	        Fx3WriteReg32(FX3_DEV_EPI_CS + 0, FX3_DEV_EPI_CS_VALID);
+		/* Re-assert EP0 with full config: VALID + TYPE=Control + PAYLOAD=64 bytes */
+		Fx3WriteReg32(FX3_DEV_EPO_CS + 0,
+			      FX3_DEV_EPO_CS_VALID |
+			      (0UL << FX3_DEV_EPO_CS_TYPE_SHIFT) |
+			      (64UL << FX3_DEV_EPO_CS_PAYLOAD_SHIFT));
+		Fx3WriteReg32(FX3_DEV_EPI_CS + 0,
+			      FX3_DEV_EPI_CS_VALID |
+			      (0UL << FX3_DEV_EPI_CS_TYPE_SHIFT) |
+			      (64UL << FX3_DEV_EPI_CS_PAYLOAD_SHIFT));
 
 		Fx3DmaAbortSocket(FX3_UIB_DMA_SCK(0));
 	        Fx3DmaAbortSocket(FX3_UIBIN_DMA_SCK(0));
@@ -585,8 +615,7 @@ void Fx3UsbInit(const struct Fx3UsbCallbacks *callbacks)
 		FX3_LNK_INTR_MASK_LTSSM_RESET |
 		FX3_LNK_INTR_MASK_LTSSM_DISCONNECT |
 		FX3_LNK_INTR_MASK_LTSSM_CONNECT |
-		FX3_LNK_INTR_MASK_LGO_U3 |
-		FX3_LNK_INTR_MASK_LTSSM_STATE_CHG);
+		FX3_LNK_INTR_MASK_LGO_U3);
   Fx3WriteReg32(FX3_PROT_EP_INTR_MASK, 0);
   Fx3WriteReg32(FX3_PROT_INTR, ~0UL);
   Fx3WriteReg32(FX3_PROT_INTR_MASK,
@@ -663,9 +692,9 @@ void Fx3UsbInit(const struct Fx3UsbCallbacks *callbacks)
 		(1UL << FX3_IRQ_GCTL_POWER) | (1UL << FX3_IRQ_USB_CORE) | (1UL << FX3_IRQ_GCTL_CORE));
 }
 
-void Fx3UsbEnableInEndpoint(uint8_t ep, Fx3UsbEndpointType_t type, uint16_t pktsize)
+void Fx3UsbEnableInEndpoint(uint8_t ep, Fx3UsbEndpointType_t type, uint16_t pktsize, uint8_t burst_len)
 {
-  
+
   static const uint8_t usb2_type_map[] = {
     [FX3_USB_EP_ISOCHRONOUS] = 1,
     [FX3_USB_EP_INTERRUPT] = 3,
@@ -673,10 +702,11 @@ void Fx3UsbEnableInEndpoint(uint8_t ep, Fx3UsbEndpointType_t type, uint16_t pkts
     [FX3_USB_EP_CONTROL] = 0,
   };
 
-  /* USB3 EP valid */
+  /* USB3 EP valid with burst configuration */
   Fx3WriteReg32(FX3_PROT_EPI_CS1+(ep<<2), FX3_PROT_EPI_CS1_VALID);
   Fx3WriteReg32(FX3_PROT_EPI_CS2+(ep<<2),
 		(16UL << FX3_PROT_EPI_CS2_ISOINPKS_SHIFT) |
+		(((burst_len - 1) << FX3_PROT_EPI_CS2_MAXBURST_SHIFT) & FX3_PROT_EPI_CS2_MAXBURST_MASK) |
 		((type << FX3_PROT_EPI_CS2_TYPE_SHIFT) & FX3_PROT_EPI_CS2_TYPE_MASK));
 
   /* USB2 EP valid */
@@ -696,4 +726,62 @@ void Fx3UsbFlushInEndpoint(uint8_t ep)
   Fx3SetReg32(FX3_EEPM_ENDPOINT+(ep<<2), FX3_EEPM_ENDPOINT_SOCKET_FLUSH);
   Fx3UtilDelayUs(5);
   Fx3ClearReg32(FX3_EEPM_ENDPOINT+(ep<<2), FX3_EEPM_ENDPOINT_SOCKET_FLUSH);
+}
+
+void Fx3UsbSetEpNak(uint8_t ep, uint8_t nak)
+{
+  /* Set or clear NAK on IN endpoint to pause/resume data transmission */
+  if (nak) {
+    Fx3SetReg32(FX3_DEV_EPI_CS+(ep<<2), FX3_DEV_EPI_CS_NAK);
+  } else {
+    Fx3ClearReg32(FX3_DEV_EPI_CS+(ep<<2), FX3_DEV_EPI_CS_NAK);
+  }
+}
+
+void Fx3UsbResetEpDataToggle(uint8_t ep)
+{
+  /* Clear the endpoint's stall and NAK status at device layer */
+  Fx3ClearReg32(FX3_DEV_EPI_CS+(ep<<2),
+                FX3_DEV_EPI_CS_STALL | FX3_DEV_EPI_CS_NAK);
+
+  /* Clear error status bits at protocol layer for SuperSpeed.
+   * OOSERR (bit 14) is Out-of-Sequence Error - causes repeated CLEAR_FEATURE.
+   * These status bits (OOSERR, SHORT, ZERO, etc) are write-1-to-clear. */
+  Fx3WriteReg32(FX3_PROT_EPI_CS1+(ep<<2),
+                FX3_PROT_EPI_CS1_OOSERR |       /* Clear out-of-sequence error */
+                FX3_PROT_EPI_CS1_SHORT |        /* Clear short packet status */
+                FX3_PROT_EPI_CS1_ZERO |         /* Clear zero-length status */
+                FX3_PROT_EPI_CS1_VALID);        /* Keep valid set */
+
+  /* Clear stall and NRDY at protocol layer */
+  Fx3ClearReg32(FX3_PROT_EPI_CS1+(ep<<2),
+                FX3_PROT_EPI_CS1_STALL | FX3_PROT_EPI_CS1_NRDY);
+
+  /* Reset the protocol layer endpoint state for SuperSpeed.
+   * EP_RESET clears the endpoint's sequence number and state. */
+  Fx3SetReg32(FX3_PROT_EPI_CS1+(ep<<2), FX3_PROT_EPI_CS1_EP_RESET);
+  Fx3UtilDelayUs(1);
+  Fx3ClearReg32(FX3_PROT_EPI_CS1+(ep<<2), FX3_PROT_EPI_CS1_EP_RESET);
+
+  /* Make sure endpoint is marked as valid */
+  Fx3SetReg32(FX3_PROT_EPI_CS1+(ep<<2), FX3_PROT_EPI_CS1_VALID);
+}
+
+void Fx3UsbSetEpBurstMode(uint8_t ep, uint8_t enable)
+{
+  // unsure if this is correct
+  if (ep == 0 || ep > 15)
+    return;
+
+  uint32_t mult = Fx3ReadReg32(FX3_IEPM_MULT);
+
+  if (enable) {
+    /* Set bit (ep-1) to enable MULT for this endpoint */
+    mult |= (1UL << (ep - 1));
+  } else {
+    /* Clear bit (ep-1) to disable MULT for this endpoint */
+    mult &= ~(1UL << (ep - 1));
+  }
+
+  Fx3WriteReg32(FX3_IEPM_MULT, mult);
 }

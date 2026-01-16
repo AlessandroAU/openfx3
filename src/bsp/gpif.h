@@ -232,6 +232,10 @@ extern void Fx3GpifConfigureCompat(const Fx3GpifWaveformCompat_t *waveforms,
 				   const uint32_t *registers, uint16_t num_registers);
 extern void Fx3GpifPibStart(uint16_t clock_divisor_x2);
 extern void Fx3GpifPibStop(void);
+extern void Fx3GpifSetClock(uint16_t clock_divisor_x2);
 extern Fx3GpifStat_t Fx3GpifGetStat(uint8_t *current_state);
+
+/* GPIF/PIB error counter - incremented by PIB ISR on GPIF_ERR or PIB_ERR */
+extern volatile uint32_t gpif_error_count;
 
 #endif /* BSP_GPIF_H_ */

@@ -26,9 +26,19 @@
 #include <rdb/uart.h>
 #include <rdb/gctl.h>
 
+void Fx3UartUpdateBaud(uint32_t baud_rate)
+{
+  /* Update baud rate generator using runtime system clock */
+  uint32_t sys_clk = Fx3GctlGetSysClk();
+  Fx3WriteReg32(FX3_GCTL_UART_CORE_CLK,
+		(((sys_clk/16 / baud_rate - 1) << FX3_GCTL_UART_CORE_CLK_DIV_SHIFT) & FX3_GCTL_UART_CORE_CLK_DIV_MASK) |
+		(3UL << FX3_GCTL_UART_CORE_CLK_SRC_SHIFT) |
+		FX3_GCTL_UART_CORE_CLK_CLK_EN);
+}
+
 void Fx3UartInit(uint32_t baud_rate, Fx3UartParity_t parity, Fx3UartStopBits_t stop_bits)
 {
-  /* Configure baud rate generator */
+  /* Configure baud rate generator using compile-time SYS_CLK */
   Fx3WriteReg32(FX3_GCTL_UART_CORE_CLK,
 		(((SYS_CLK/16 / baud_rate - 1) << FX3_GCTL_UART_CORE_CLK_DIV_SHIFT) & FX3_GCTL_UART_CORE_CLK_DIV_MASK) |
 		(3UL << FX3_GCTL_UART_CORE_CLK_SRC_SHIFT) |
