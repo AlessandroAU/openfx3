@@ -1,6 +1,7 @@
 MAKEFLAGS += -j$(shell nproc 2>/dev/null || echo 4)
 
 CC = arm-none-eabi-gcc
+PYTHON := $(shell python3 --version >/dev/null 2>&1 && echo python3 || echo python)
 
 BUILD = build
 CGENFLAGS = -mcpu=arm926ej-s -mthumb-interwork -fno-pie
@@ -20,7 +21,7 @@ BUILD_OBJS = $(addprefix $(BUILD)/,$(OBJS))
 all : $(BUILD)/openfx3.fw examples
 
 $(BUILD)/openfx3.fw : $(BUILD)/openfx3.elf
-	python elf2img.py $< $@
+	$(PYTHON) elf2img.py $< $@
 
 $(BUILD)/openfx3.elf : $(BUILD_OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
@@ -36,7 +37,7 @@ $(BUILD) :
 
 clean :
 	rm -rf $(BUILD)
-	rm -rf *.exe
+	rm -f *.exe stream sweep benchmark
 
 -include $(BUILD_OBJS:.o=.d)
 
@@ -46,12 +47,12 @@ clean :
 
 HOST_CC = gcc
 HOST_AR = ar
-HOST_CFLAGS = -std=c11 -Wall -Wextra -O3 -g -Ilib/include $(shell pkg-config --cflags libusb-1.0)
+HOST_CFLAGS = -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -O3 -g -Ilib/include $(shell pkg-config --cflags libusb-1.0)
 HOST_LDFLAGS = $(shell pkg-config --libs libusb-1.0)
 
 # Embedded firmware header (RLE compressed)
 lib/src/firmware.h : $(BUILD)/openfx3.fw fw2header.py
-	python fw2header.py $< $@
+	$(PYTHON) fw2header.py $< $@
 
 # ------------------------------------------------------------------------------
 # Static library: libopenfx3.a

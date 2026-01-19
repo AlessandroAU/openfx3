@@ -241,8 +241,6 @@ int main(int argc, char **argv) {
     printf("FX3 Stream Test%s\n", g_validate_mode ? " (counter validation)" : "");
     printf("===============%s\n\n", g_validate_mode ? "=====================" : "");
 
-    platform_interval_timer_init(&g_timer);
-
     /* Initialize libusb */
     ret = libusb_init(&g_usb_ctx);
     if (ret != 0) {

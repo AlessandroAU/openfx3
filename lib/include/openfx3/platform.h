@@ -1,8 +1,8 @@
 /*
- * Platform abstraction layer for test utilities
+ * Platform abstraction layer
  *
- * Provides cross-platform helpers for timing, sleeping, and other
- * OS-specific functionality.
+ * Provides cross-platform helpers for timing, sleeping, aligned allocation,
+ * and threading. Supports Windows, Linux, and macOS.
  */
 
 #ifndef PLATFORM_H
@@ -15,28 +15,28 @@
 #include <windows.h>
 #include <malloc.h>
 #else
+#include <errno.h>
 #include <time.h>
-#include <unistd.h>
+#include <pthread.h>
 #endif
 
-/*
- * Sleep for specified milliseconds
- */
-static inline void sleep_ms(int ms) {
+/* ============================================================================
+ * Sleep functions
+ * ============================================================================ */
+
+static inline void sleep_ms(unsigned int ms) {
 #ifdef _WIN32
     Sleep(ms);
 #else
-    usleep(ms * 1000);
+    struct timespec ts = { .tv_sec = ms / 1000, .tv_nsec = (ms % 1000) * 1000000L };
+    while (nanosleep(&ts, &ts) == -1 && errno == EINTR);
 #endif
 }
 
-/*
- * Sleep for specified microseconds
- */
-static inline void sleep_us(int us) {
+static inline void sleep_us(unsigned int us) {
 #ifdef _WIN32
-    /* Windows doesn't have sub-millisecond sleep, use busy-wait for short durations */
     if (us < 1000) {
+        /* Windows Sleep() has ms resolution, busy-wait for short durations */
         LARGE_INTEGER freq, start, now;
         QueryPerformanceFrequency(&freq);
         QueryPerformanceCounter(&start);
@@ -48,13 +48,15 @@ static inline void sleep_us(int us) {
         Sleep(us / 1000);
     }
 #else
-    usleep(us);
+    struct timespec ts = { .tv_sec = us / 1000000, .tv_nsec = (us % 1000000) * 1000L };
+    while (nanosleep(&ts, &ts) == -1 && errno == EINTR);
 #endif
 }
 
-/*
- * High-resolution timer for measuring elapsed time
- */
+/* ============================================================================
+ * High-resolution timer
+ * ============================================================================ */
+
 typedef struct {
 #ifdef _WIN32
     LARGE_INTEGER freq;
@@ -64,23 +66,16 @@ typedef struct {
 #endif
 } platform_timer_t;
 
-static inline void platform_timer_init(platform_timer_t *t) {
-#ifdef _WIN32
-    QueryPerformanceFrequency(&t->freq);
-#else
-    (void)t;
-#endif
-}
-
 static inline void platform_timer_start(platform_timer_t *t) {
 #ifdef _WIN32
+    QueryPerformanceFrequency(&t->freq);
     QueryPerformanceCounter(&t->start);
 #else
     clock_gettime(CLOCK_MONOTONIC, &t->start);
 #endif
 }
 
-static inline double platform_timer_elapsed_us(platform_timer_t *t) {
+static inline double platform_timer_elapsed_us(const platform_timer_t *t) {
 #ifdef _WIN32
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
@@ -93,18 +88,18 @@ static inline double platform_timer_elapsed_us(platform_timer_t *t) {
 #endif
 }
 
-static inline double platform_timer_elapsed_ms(platform_timer_t *t) {
+static inline double platform_timer_elapsed_ms(const platform_timer_t *t) {
     return platform_timer_elapsed_us(t) / 1000.0;
 }
 
-static inline double platform_timer_elapsed_sec(platform_timer_t *t) {
+static inline double platform_timer_elapsed_sec(const platform_timer_t *t) {
     return platform_timer_elapsed_us(t) / 1000000.0;
 }
 
-/*
- * Interval timer - tracks both total elapsed time and interval time
- * Useful for periodic stats updates while tracking overall duration
- */
+/* ============================================================================
+ * Interval timer - tracks total elapsed time and interval time
+ * ============================================================================ */
+
 typedef struct {
 #ifdef _WIN32
     LARGE_INTEGER freq;
@@ -116,16 +111,9 @@ typedef struct {
 #endif
 } platform_interval_timer_t;
 
-static inline void platform_interval_timer_init(platform_interval_timer_t *t) {
-#ifdef _WIN32
-    QueryPerformanceFrequency(&t->freq);
-#else
-    (void)t;
-#endif
-}
-
 static inline void platform_interval_timer_start(platform_interval_timer_t *t) {
 #ifdef _WIN32
+    QueryPerformanceFrequency(&t->freq);
     QueryPerformanceCounter(&t->start);
     t->interval_start = t->start;
 #else
@@ -134,7 +122,7 @@ static inline void platform_interval_timer_start(platform_interval_timer_t *t) {
 #endif
 }
 
-static inline double platform_interval_timer_elapsed_sec(platform_interval_timer_t *t) {
+static inline double platform_interval_timer_elapsed_sec(const platform_interval_timer_t *t) {
 #ifdef _WIN32
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
@@ -147,7 +135,7 @@ static inline double platform_interval_timer_elapsed_sec(platform_interval_timer
 #endif
 }
 
-static inline double platform_interval_timer_interval_ms(platform_interval_timer_t *t) {
+static inline double platform_interval_timer_interval_ms(const platform_interval_timer_t *t) {
 #ifdef _WIN32
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
@@ -168,9 +156,9 @@ static inline void platform_interval_timer_reset_interval(platform_interval_time
 #endif
 }
 
-/*
- * Aligned memory allocation (page-aligned for DMA buffers)
- */
+/* ============================================================================
+ * Aligned memory allocation
+ * ============================================================================ */
 
 static inline void *platform_aligned_alloc(size_t size, size_t alignment) {
 #ifdef _WIN32
@@ -190,39 +178,36 @@ static inline void platform_aligned_free(void *p) {
 #endif
 }
 
-/*
- * Thread support
- */
+/* ============================================================================
+ * Threading
+ * ============================================================================ */
 
 #ifdef _WIN32
 
-/* Windows thread wrapper to bridge POSIX-style void*(*)(void*) to DWORD(*)(void*) */
-typedef void *(*platform_thread_func_t)(void *);
+typedef HANDLE platform_thread_t;
 
 typedef struct {
-    platform_thread_func_t func;
+    void *(*func)(void *);
     void *arg;
-} platform_thread_wrapper_t;
+} platform_thread_wrapper_t_;
 
-static DWORD WINAPI platform_thread_wrapper(LPVOID param) {
-    platform_thread_wrapper_t *wrapper = (platform_thread_wrapper_t *)param;
-    platform_thread_func_t func = wrapper->func;
-    void *arg = wrapper->arg;
-    free(wrapper);
+static DWORD WINAPI platform_thread_wrapper_(LPVOID param) {
+    platform_thread_wrapper_t_ *w = (platform_thread_wrapper_t_ *)param;
+    void *(*func)(void *) = w->func;
+    void *arg = w->arg;
+    free(w);
     func(arg);
     return 0;
 }
 
-typedef HANDLE platform_thread_t;
-
 static inline int platform_thread_create(platform_thread_t *thread, void *(*func)(void *), void *arg) {
-    platform_thread_wrapper_t *wrapper = (platform_thread_wrapper_t *)malloc(sizeof(*wrapper));
-    if (!wrapper) return -1;
-    wrapper->func = func;
-    wrapper->arg = arg;
-    *thread = CreateThread(NULL, 0, platform_thread_wrapper, wrapper, 0, NULL);
+    platform_thread_wrapper_t_ *w = (platform_thread_wrapper_t_ *)malloc(sizeof(*w));
+    if (!w) return -1;
+    w->func = func;
+    w->arg = arg;
+    *thread = CreateThread(NULL, 0, platform_thread_wrapper_, w, 0, NULL);
     if (*thread == NULL) {
-        free(wrapper);
+        free(w);
         return -1;
     }
     return 0;
@@ -235,11 +220,11 @@ static inline int platform_thread_join(platform_thread_t thread) {
 }
 
 #else
-#include <pthread.h>
+
 typedef pthread_t platform_thread_t;
 
 static inline int platform_thread_create(platform_thread_t *thread, void *(*func)(void *), void *arg) {
-    return pthread_create(thread, NULL, func, arg);
+    return pthread_create(thread, NULL, func, arg) == 0 ? 0 : -1;
 }
 
 static inline int platform_thread_join(platform_thread_t thread) {

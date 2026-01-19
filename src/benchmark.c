@@ -159,7 +159,12 @@ void start_benchmark(void)
     uint16_t *descriptors = Fx3DmaPoolDescriptors();
 
     /* Start USB consumer socket */
-    Fx3DmaStartConsumerBurst(FX3_UIB_DMA_SCK(2), descriptors[0], 0, 0);
+    Fx3DmaTransferStart(FX3_UIB_DMA_SCK(2), descriptors[0],
+            FX3_SCK_STATUS_SUSP_TRANS	|
+            FX3_SCK_STATUS_EN_CONS_EVENTS |
+            FX3_SCK_STATUS_TRUNCATE |
+            FX3_SCK_STATUS_AVL_ENABLE,
+            0, 0);
 
     /* Enable USB endpoint */
     Fx3UsbSetEpNak(2, 0);

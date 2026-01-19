@@ -259,7 +259,6 @@ static test_result_t test_frequency(int freq_mhz, int bus_width) {
 
     /* Run until we collect target bytes (or timeout) */
     platform_timer_t timer;
-    platform_timer_init(&timer);
     platform_timer_start(&timer);
 
     while (!g_quit) {

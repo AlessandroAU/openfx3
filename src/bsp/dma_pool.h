@@ -7,8 +7,8 @@
  * Shared DMA pool used by acquisition and benchmark.
  * Only one mode runs at a time, so buffers/descriptors can be reused.
  */
-#define FX3_DMA_POOL_SOCKETS            2
-#define FX3_DMA_POOL_BUFFERS_PER_SOCKET 6
+#define FX3_DMA_POOL_SOCKETS            4
+#define FX3_DMA_POOL_BUFFERS_PER_SOCKET 3
 #define FX3_DMA_POOL_COUNT              (FX3_DMA_POOL_SOCKETS * FX3_DMA_POOL_BUFFERS_PER_SOCKET)
 #define FX3_DMA_POOL_BUFFER_SIZE        32768
 

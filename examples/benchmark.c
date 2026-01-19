@@ -198,8 +198,6 @@ int main(int argc, char **argv) {
     printf("FX3 USB Benchmark\n");
     printf("=================\n\n");
 
-    platform_interval_timer_init(&g_timer);
-
     /* Initialize libusb */
     ret = libusb_init(&g_usb_ctx);
     if (ret != 0) {
@@ -288,7 +286,6 @@ int main(int argc, char **argv) {
     fflush(stdout);
 
     platform_interval_timer_t warmup_timer;
-    platform_interval_timer_init(&warmup_timer);
     platform_interval_timer_start(&warmup_timer);
 
     printf("\r                      \r");

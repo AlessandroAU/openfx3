@@ -499,7 +499,6 @@ int fx3_wait_acquisition_ready(libusb_device_handle *handle, int timeout_ms) {
     platform_timer_t timer;
     struct fx3_acq_status status;
 
-    platform_timer_init(&timer);
     platform_timer_start(&timer);
 
     /* Check immediately first, then loop with sleep until timeout */
