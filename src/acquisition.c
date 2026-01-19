@@ -29,7 +29,7 @@
 #include <stdio.h>
 
 /* Uncomment to enable UART debug output (costs ~1KB flash) */
-// #define DEBUG_UART
+#define DEBUG_UART
 
 #include "benchmark.h"
 #include "command.h"
@@ -315,9 +315,6 @@ void start_acquisition(uint16_t clock_divisor_x2, const struct acq_config *confi
     Fx3DmaPoolInit();
 
     if (!Fx3DmaPoolAcquire(FX3_DMA_POOL_OWNER_ACQUISITION)) {
-#ifdef DEBUG_UART
-        Fx3UartTxString("ERROR: DMA pool is busy\n");
-#endif
         return;
     }
 

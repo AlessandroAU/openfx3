@@ -16,9 +16,6 @@
 #include <rdb/dma.h>
 #include <rdb/vic.h>
 
-/* Uncomment to enable UART debug output (costs ~1KB flash) */
-// #define DEBUG_UART
-
 #include "acquisition.h"
 
 //65520
@@ -145,9 +142,6 @@ void start_benchmark(void)
     if (is_acquisition_active()) {stop_acquisition();}
 
     if (!Fx3DmaPoolAcquire(FX3_DMA_POOL_OWNER_BENCHMARK)) {
-#ifdef DEBUG_UART
-        Fx3UartTxString("ERROR: DMA pool is busy\n");
-#endif
         return;
     }
 

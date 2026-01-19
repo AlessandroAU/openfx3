@@ -4,9 +4,6 @@
 #include <bsp/irq.h>
 #include <bsp/uart.h>
 
-/* Uncomment to enable UART debug output (costs ~1KB flash) */
-// #define DEBUG_UART
-
 static Fx3DmaPoolOwner_t dma_pool_owner = FX3_DMA_POOL_OWNER_NONE;
 static uint8_t dma_pool_initialized = 0;
 
@@ -23,9 +20,6 @@ void Fx3DmaPoolInit(void)
     for (unsigned i = 0; i < FX3_DMA_POOL_COUNT; i++) {
         uint16_t d = Fx3DmaAllocateDescriptor();
         if (!d) {
-#ifdef DEBUG_UART
-            Fx3UartTxString("ERROR: DMA descriptor allocation failed\n");
-#endif
             break;
         }
         dma_pool_descriptors[i] = d;

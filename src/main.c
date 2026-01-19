@@ -15,7 +15,7 @@
 #include <stdio.h>
 
 /* Uncomment to enable UART debug output (costs ~1KB flash) */
-// #define DEBUG_UART
+#define DEBUG_UART
 
 #include "descriptors.h"
 #include "acquisition.h"
@@ -484,21 +484,8 @@ int main(void)
   Fx3UartInit(115200, FX3_UART_NO_PARITY, FX3_UART_1_STOP_BIT);
   Fx3I2cInit(FX3_I2C_400KHZ);
 
-#ifdef DEBUG_UART
-  /* One-time clock source debug: show FSLC and derived PLL reference clock. */
-  {
-    uint32_t fslc = Fx3GctlGetPllFslc();
-    uint32_t ref_hz = Fx3GctlGetPllRefClkHz();
-
-    char clkbuf[96];
-    snprintf(clkbuf, sizeof(clkbuf), "PLL ref: FSLC=0x%lx -> %lu Hz\n",
-             (unsigned long)fslc, (unsigned long)ref_hz);
-    Fx3UartTxString(clkbuf);
-  }
-
-  Fx3UartTxString("\nGood moaning!\n");
+  Fx3UartTxString("\nBooting...\n");
   Fx3UartTxFlush();
-#endif
 
   // Fx3GpioInitClock();
   // Fx3GpioSetupSimple(45,
