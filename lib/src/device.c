@@ -360,20 +360,23 @@ int fx3_init(libusb_context *ctx, libusb_device_handle **handle_out,
 }
 
 int fx3_start_acquisition(libusb_device_handle *handle, int bus_mhz,
-                          int bus_width, int internal_clock) {
-    /* Command data: bus_mhz, bus_width, reserved */
+                          const struct fx3_acq_config *config) {
+    /* Command data: bus_mhz, config (2 bytes: bus_width + flags) */
     uint8_t cmd_data[3] = {
         (uint8_t)bus_mhz,
-        (uint8_t)bus_width,
-        0  /* reserved */
+        config->bus_width,
+        /* Pack bitfields into flags byte */
+        (uint8_t)((config->internal_clk ? 0x01 : 0) |
+                  (config->clk_invert ? 0x02 : 0) |
+                  (config->clk_out ? 0x04 : 0) |
+                  (config->ddr ? 0x08 : 0) |
+                  (config->endian ? 0x10 : 0))
     };
-    /* wValue bit 0: clock source (0=external, 1=internal) */
-    uint16_t wValue = internal_clock ? 0x0001 : 0x0000;
 
     int ret = libusb_control_transfer(handle,
         LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_ENDPOINT_OUT,
         FX3_CMD_START,
-        wValue, 0x0000,
+        0x0000, 0x0000,
         cmd_data, sizeof(cmd_data),
         1000);
 
@@ -642,5 +645,86 @@ int fx3_print_endpoints(libusb_device_handle *handle) {
     libusb_free_config_descriptor(config);
     printf("\n");
     return 0;
+}
+
+int fx3_i2c_write(libusb_device_handle *handle, uint8_t addr,
+                  const uint8_t *data, size_t len) {
+    if (len == 0 || len > 258) {
+        return -1;
+    }
+
+    int ret = libusb_control_transfer(handle,
+        LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_ENDPOINT_OUT,
+        FX3_CMD_I2C_WRITE,
+        addr & 0x7F,  /* wValue = slave address */
+        0x0000,       /* wIndex = 0 */
+        (uint8_t *)data, len,
+        1000);
+
+    return (ret < 0) ? -1 : 0;
+}
+
+int fx3_i2c_read(libusb_device_handle *handle, uint8_t addr,
+                 uint8_t *data, size_t len) {
+    if (len == 0 || len > 256) {
+        return -1;
+    }
+
+    int ret = libusb_control_transfer(handle,
+        LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_ENDPOINT_IN,
+        FX3_CMD_I2C_READ,
+        addr & 0x7F,  /* wValue = slave address */
+        len,          /* wIndex = read length */
+        data, len,
+        1000);
+
+    return (ret < 0) ? -1 : 0;
+}
+
+int fx3_i2c_read_reg(libusb_device_handle *handle, uint8_t addr,
+                     uint8_t reg, uint8_t *data, size_t len) {
+    if (len == 0 || len > 256) {
+        return -1;
+    }
+
+    /* wValue = slave_addr (low byte) | reg_addr (high byte)
+     * wIndex = write_len (low byte) | read_len (high byte) */
+    uint16_t wValue = (addr & 0x7F) | ((uint16_t)reg << 8);
+    uint16_t wIndex = 1 | ((uint16_t)len << 8);
+
+    int ret = libusb_control_transfer(handle,
+        LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_ENDPOINT_IN,
+        FX3_CMD_I2C_WRITE_READ,
+        wValue,
+        wIndex,
+        data, len,
+        1000);
+
+    return (ret < 0) ? -1 : 0;
+}
+
+int fx3_i2c_scan(libusb_device_handle *handle, uint8_t *found_addrs, size_t max_found) {
+    size_t found = 0;
+    uint8_t dummy;
+
+    /* Scan valid I2C addresses: 0x08 to 0x77 (skip reserved ranges) */
+    for (uint8_t addr = 0x08; addr <= 0x77 && found < max_found; addr++) {
+        /* Try to read 1 byte - if device ACKs, it's present */
+        int ret = libusb_control_transfer(handle,
+            LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_ENDPOINT_IN,
+            FX3_CMD_I2C_READ,
+            addr,
+            1,  /* wIndex = read length */
+            &dummy, 1,
+            100);  /* Short timeout for scan */
+
+        if (ret >= 0) {
+            /* Device responded */
+            found_addrs[found++] = addr;
+        }
+        /* ret < 0 means NACK or error - device not present, continue */
+    }
+
+    return (int)found;
 }
 

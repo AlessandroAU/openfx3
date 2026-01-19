@@ -15,7 +15,7 @@ LDFLAGS = -Wl,--gc-sections -static -nostartfiles -T src/bsp/fx3.ld -Wl,-z,max-p
 
 VPATH = src src/bsp
 
-OBJS = main.o descriptors.o acquisition.o benchmark.o usb.o gpif.o gctl.o gpio.o uart.o util.o dma.o dma_pool.o irq.o cache.o vectors.o
+OBJS = main.o descriptors.o acquisition.o benchmark.o usb.o gpif.o gctl.o gpio.o uart.o i2c.o util.o dma.o dma_pool.o irq.o cache.o vectors.o
 BUILD_OBJS = $(addprefix $(BUILD)/,$(OBJS))
 
 all : $(BUILD)/openfx3.fw examples
@@ -37,7 +37,7 @@ $(BUILD) :
 
 clean :
 	rm -rf $(BUILD)
-	rm -f *.exe stream sweep benchmark
+	rm -f *.exe stream sweep benchmark i2cscan i2ctest i2cdump i2cprogram
 
 -include $(BUILD_OBJS:.o=.d)
 
@@ -90,7 +90,7 @@ $(BUILD)/lib_acquisition.o : lib/src/acquisition.c | $(BUILD)
 # Prefixed with ex_ to avoid collision with firmware objects
 # ------------------------------------------------------------------------------
 
-examples : $(BUILD)/stream $(BUILD)/sweep $(BUILD)/benchmark
+examples : $(BUILD)/stream $(BUILD)/sweep $(BUILD)/benchmark $(BUILD)/i2cscan $(BUILD)/i2ctest $(BUILD)/i2cdump $(BUILD)/i2cprogram
 
 $(BUILD)/stream : $(BUILD)/ex_stream.o $(LIBOPENFX3)
 	$(HOST_CC) -o $@ $< -L$(BUILD) -lopenfx3 $(HOST_LDFLAGS)
@@ -112,4 +112,32 @@ $(BUILD)/ex_sweep.o : examples/sweep.c | $(BUILD)
 	$(HOST_CC) $(HOST_CFLAGS) -c -o $@ $<
 
 $(BUILD)/ex_benchmark.o : examples/benchmark.c | $(BUILD)
+	$(HOST_CC) $(HOST_CFLAGS) -c -o $@ $<
+
+$(BUILD)/i2cscan : $(BUILD)/ex_i2cscan.o $(LIBOPENFX3)
+	$(HOST_CC) -o $@ $< -L$(BUILD) -lopenfx3 $(HOST_LDFLAGS)
+	cp $@ .
+
+$(BUILD)/ex_i2cscan.o : examples/i2cscan.c | $(BUILD)
+	$(HOST_CC) $(HOST_CFLAGS) -c -o $@ $<
+
+$(BUILD)/i2ctest : $(BUILD)/ex_i2ctest.o $(LIBOPENFX3)
+	$(HOST_CC) -o $@ $< -L$(BUILD) -lopenfx3 $(HOST_LDFLAGS)
+	cp $@ .
+
+$(BUILD)/ex_i2ctest.o : examples/i2ctest.c | $(BUILD)
+	$(HOST_CC) $(HOST_CFLAGS) -c -o $@ $<
+
+$(BUILD)/i2cdump : $(BUILD)/ex_i2cdump.o $(LIBOPENFX3)
+	$(HOST_CC) -o $@ $< -L$(BUILD) -lopenfx3 $(HOST_LDFLAGS)
+	cp $@ .
+
+$(BUILD)/ex_i2cdump.o : examples/i2cdump.c | $(BUILD)
+	$(HOST_CC) $(HOST_CFLAGS) -c -o $@ $<
+
+$(BUILD)/i2cprogram : $(BUILD)/ex_i2cprogram.o $(LIBOPENFX3)
+	$(HOST_CC) -o $@ $< -L$(BUILD) -lopenfx3 $(HOST_LDFLAGS)
+	cp $@ .
+
+$(BUILD)/ex_i2cprogram.o : examples/i2cprogram.c | $(BUILD)
 	$(HOST_CC) $(HOST_CFLAGS) -c -o $@ $<

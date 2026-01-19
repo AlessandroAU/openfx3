@@ -28,7 +28,11 @@
 #include <rdb/gpif.h>
 #include <stdio.h>
 
+/* Uncomment to enable UART debug output (costs ~1KB flash) */
+// #define DEBUG_UART
+
 #include "benchmark.h"
+#include "command.h"
 
 #define NUM_SOCKETS             FX3_DMA_POOL_SOCKETS
 #define NUM_BUFFERS_PER_SOCKET  FX3_DMA_POOL_BUFFERS_PER_SOCKET
@@ -302,7 +306,7 @@ void reset_drop_stats(void)
     gpif_error_count = 0;
 }
 
-void start_acquisition(uint8_t bits, uint16_t clock_divisor_x2, uint8_t use_internal_clock)
+void start_acquisition(uint16_t clock_divisor_x2, const struct acq_config *config)
 {
     /* Stop any running benchmark or acquisition */
     if (is_benchmark_active()) {stop_benchmark();}
@@ -311,22 +315,38 @@ void start_acquisition(uint8_t bits, uint16_t clock_divisor_x2, uint8_t use_inte
     Fx3DmaPoolInit();
 
     if (!Fx3DmaPoolAcquire(FX3_DMA_POOL_OWNER_ACQUISITION)) {
+#ifdef DEBUG_UART
         Fx3UartTxString("ERROR: DMA pool is busy\n");
+#endif
         return;
     }
 
     /* Configure bus width: (bits/8 - 1) for register value */
     gpif_registers.bus_config &= ~FX3_GPIF_BUS_CONFIG_BUS_WIDTH_MASK;
-    gpif_registers.bus_config |= ((bits >> 3) - 1) << FX3_GPIF_BUS_CONFIG_BUS_WIDTH_SHIFT;
+    gpif_registers.bus_config |= ((config->bus_width >> 3) - 1) << FX3_GPIF_BUS_CONFIG_BUS_WIDTH_SHIFT;
 
-    /* Configure clock source and speed mode */
-    gpif_registers.config &= ~(FX3_GPIF_CONFIG_CLK_SOURCE | FX3_GPIF_CONFIG_CLK_OUT | FX3_GPIF_CONFIG_SYNC_SPEED);
-    if (use_internal_clock) {
-        gpif_registers.config |= FX3_GPIF_CONFIG_CLK_SOURCE | FX3_GPIF_CONFIG_CLK_OUT;
+    /* Configure clock source, speed mode, polarity, and other options */
+    gpif_registers.config &= ~(FX3_GPIF_CONFIG_CLK_SOURCE | FX3_GPIF_CONFIG_CLK_OUT |
+                               FX3_GPIF_CONFIG_SYNC_SPEED | FX3_GPIF_CONFIG_CLK_INVERT |
+                               FX3_GPIF_CONFIG_DDR_MODE | FX3_GPIF_CONFIG_ENDIAN);
+    if (config->internal_clk) {
+        gpif_registers.config |= FX3_GPIF_CONFIG_CLK_SOURCE;
+        if (config->clk_out) {
+            gpif_registers.config |= FX3_GPIF_CONFIG_CLK_OUT;
+        }
     }
     /* SYNC_SPEED=1 for frequencies >50MHz (sys_clk ~480MHz, div_x2 < 10 means >48MHz) */
     if (clock_divisor_x2 < 10) {
         gpif_registers.config |= FX3_GPIF_CONFIG_SYNC_SPEED;
+    }
+    if (config->clk_invert) {
+        gpif_registers.config |= FX3_GPIF_CONFIG_CLK_INVERT;
+    }
+    if (config->ddr) {
+        gpif_registers.config |= FX3_GPIF_CONFIG_DDR_MODE;
+    }
+    if (config->endian) {
+        gpif_registers.config |= FX3_GPIF_CONFIG_ENDIAN;
     }
 
     setup_descriptors();
@@ -371,6 +391,7 @@ void start_acquisition(uint8_t bits, uint16_t clock_divisor_x2, uint8_t use_inte
 
 void poll_acquisition(void)
 {
+#ifdef DEBUG_UART
     if (Fx3GpifGetStat(NULL) == FX3_GPIF_PAUSED) {
         Fx3UartTxString("GPIF paused\n");
     }
@@ -379,4 +400,5 @@ void poll_acquisition(void)
     sprintf(buf, "Acq Status: Buffers=%llu Bytes=%llu Stalls=%lu\n",
             acq_total_buffers, get_acq_total_bytes(), (unsigned long)acq_stalls);
     Fx3UartTxString(buf);
+#endif
 }

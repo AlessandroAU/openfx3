@@ -34,6 +34,9 @@
 #define FX3_CMD_GET_ACQ_STATUS 0xb6
 #define FX3_CMD_REBOOT_BOOTLOADER 0xb7
 #define FX3_CMD_START_BENCHMARK 0xb8
+#define FX3_CMD_I2C_WRITE      0xb9
+#define FX3_CMD_I2C_READ       0xba
+#define FX3_CMD_I2C_WRITE_READ 0xbb
 
 /*
  * Initialize an FX3 device, uploading firmware if necessary.
@@ -104,19 +107,32 @@ int fx3_open_device(libusb_context *ctx, libusb_device_handle **handle_out,
                     int force_firmware);
 
 /*
+ * Acquisition configuration (matches firmware struct acq_config)
+ */
+struct fx3_acq_config {
+    uint8_t bus_width;     /* Bus width: 8, 16, 24, or 32 bits */
+    uint8_t internal_clk:1;/* Use internal clock (1) or external clock (0) */
+    uint8_t clk_invert:1;  /* Sample on falling edge instead of rising */
+    uint8_t clk_out:1;     /* Output clock on CLK pin (internal clock only) */
+    uint8_t ddr:1;         /* DDR mode: sample on both clock edges */
+    uint8_t endian:1;      /* Swap byte order (big-endian) */
+    uint8_t reserved:3;    /* Reserved for future use */
+};
+
+/*
  * Start acquisition with specified parameters.
  *
  * Parameters:
- *   handle        - Device handle
- *   bus_mhz       - GPIF bus clock rate in MHz (e.g., 20, 40, 65, 80, 100)
- *   bus_width     - Bus width in bits (8, 16, 24, or 32)
- *   internal_clock - If non-zero, use internal clock; otherwise external
+ *   handle  - Device handle
+ *   bus_mhz - GPIF bus clock rate in MHz (e.g., 20, 40, 65, 80, 100)
+ *             Ignored if config->internal_clk is 0
+ *   config  - Acquisition configuration (bus width, clock source, polarity, etc.)
  *
  * Returns:
  *   0 on success, -1 on failure
  */
 int fx3_start_acquisition(libusb_device_handle *handle, int bus_mhz,
-                          int bus_width, int internal_clock);
+                          const struct fx3_acq_config *config);
 
 /*
  * Start USB benchmark mode.
@@ -273,5 +289,75 @@ int fx3_print_endpoints(libusb_device_handle *handle);
  *   immediately so subsequent operations on this handle will fail.
  */
 int fx3_reboot_bootloader(libusb_device_handle *handle);
+
+/*
+ * I2C write operation.
+ *
+ * Writes data to an I2C device at the specified 7-bit address.
+ *
+ * Parameters:
+ *   handle    - Device handle
+ *   addr      - 7-bit I2C slave address
+ *   data      - Data to write
+ *   len       - Number of bytes to write (1-60)
+ *
+ * Returns:
+ *   0 on success, -1 on failure (NACK, timeout, etc.)
+ */
+int fx3_i2c_write(libusb_device_handle *handle, uint8_t addr,
+                  const uint8_t *data, size_t len);
+
+/*
+ * I2C read operation.
+ *
+ * Reads data from an I2C device at the specified 7-bit address.
+ *
+ * Parameters:
+ *   handle    - Device handle
+ *   addr      - 7-bit I2C slave address
+ *   data      - Buffer to receive data
+ *   len       - Number of bytes to read (1-60)
+ *
+ * Returns:
+ *   0 on success, -1 on failure (NACK, timeout, etc.)
+ */
+int fx3_i2c_read(libusb_device_handle *handle, uint8_t addr,
+                 uint8_t *data, size_t len);
+
+/*
+ * I2C write-then-read operation (for register reads).
+ *
+ * Performs a combined write-read with repeated start. This is the typical
+ * pattern for reading registers from I2C devices: write the register address,
+ * then read the data.
+ *
+ * Parameters:
+ *   handle    - Device handle
+ *   addr      - 7-bit I2C slave address
+ *   reg       - Register address byte to write first
+ *   data      - Buffer to receive read data
+ *   len       - Number of bytes to read (1-60)
+ *
+ * Returns:
+ *   0 on success, -1 on failure (NACK, timeout, etc.)
+ */
+int fx3_i2c_read_reg(libusb_device_handle *handle, uint8_t addr,
+                     uint8_t reg, uint8_t *data, size_t len);
+
+/*
+ * I2C bus scan - detect devices.
+ *
+ * Attempts to read 1 byte from each address in the range 0x08-0x77.
+ * Devices that ACK are considered present.
+ *
+ * Parameters:
+ *   handle      - Device handle
+ *   found_addrs - Array to receive found addresses (must be at least 112 bytes)
+ *   max_found   - Maximum number of addresses to return
+ *
+ * Returns:
+ *   Number of devices found (0 if none), -1 on error
+ */
+int fx3_i2c_scan(libusb_device_handle *handle, uint8_t *found_addrs, size_t max_found);
 
 #endif /* FX3_DEVICE_H */

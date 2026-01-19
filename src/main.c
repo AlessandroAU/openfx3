@@ -8,10 +8,14 @@
 #include <bsp/cache.h>
 #include <bsp/util.h>
 #include <bsp/regaccess.h>
+#include <bsp/i2c.h>
 #include <rdb/uib.h>
 
 #include <string.h>
 #include <stdio.h>
+
+/* Uncomment to enable UART debug output (costs ~1KB flash) */
+// #define DEBUG_UART
 
 #include "descriptors.h"
 #include "acquisition.h"
@@ -19,7 +23,7 @@
 #include "command.h"
 
 
-static volatile uint8_t DmaBuf[64] __attribute__((aligned(32)));
+static volatile uint8_t DmaBuf[512] __attribute__((aligned(32)));
 
 static void VendorCommand(uint8_t request_type, uint8_t request, uint16_t value,
 			  uint16_t index, uint16_t length, Fx3UsbSpeed_t s)
@@ -35,29 +39,31 @@ static void VendorCommand(uint8_t request_type, uint8_t request, uint16_t value,
      * Data: struct cmd_start_acquisition (3 bytes) */
     if (index != 0 || length != sizeof(struct cmd_start_acquisition))
       goto stall;
+#ifdef DEBUG_UART
     Fx3UartTxString("CMD_START\n");
+#endif
     Fx3UsbUnstallEp0(s);
     Fx3UsbDmaDataOut(0, DmaBuf, length);
     Fx3CacheInvalidateDCacheEntry(DmaBuf);
 
     volatile struct cmd_start_acquisition *cmd = (volatile struct cmd_start_acquisition *)DmaBuf;
     uint8_t bus_mhz = cmd->bus_mhz;
-    uint8_t bus_width = cmd->bus_width;
-    uint8_t use_internal_clock = (value != 0) ? 1 : 0;
+    struct acq_config config = cmd->config;
 
     /* Validate bus_width */
-    if (bus_width != 8 && bus_width != 16 && bus_width != 24 && bus_width != 32)
-      bus_width = 32;
+    if (config.bus_width != 8 && config.bus_width != 16 &&
+        config.bus_width != 24 && config.bus_width != 32)
+      config.bus_width = 32;
 
     /* bus_mhz=0 means external clocking */
     if (bus_mhz == 0)
-      use_internal_clock = 0;
+      config.internal_clk = 0;
 
     /* Configure clock for best match to requested bus speed */
     Fx3ClockConfig_t clk_cfg;
     uint16_t clock_divisor_x2 = 2;  /* Default minimum */
 
-    if (use_internal_clock && bus_mhz > 0) {
+    if (config.internal_clk && bus_mhz > 0) {
       /* Set PLL to best value for requested bus speed */
       Fx3GctlSetBusClock(bus_mhz, &clk_cfg);
       /* gpif_div is the raw divider register value where:
@@ -67,31 +73,41 @@ static void VendorCommand(uint8_t request_type, uint8_t request, uint16_t value,
       if (clock_divisor_x2 < 2)
         clock_divisor_x2 = 2;
 
-      char buf[80];
-      snprintf(buf, sizeof(buf), "internal clock, %u-bit, actual=%lu.%02luMHz\n",
-               (unsigned)bus_width,
-               (unsigned long)(clk_cfg.bus_clk_hz / 1000000),
-               (unsigned long)((clk_cfg.bus_clk_hz % 1000000) / 10000));
-      Fx3UartTxString(buf);
+#ifdef DEBUG_UART
+      {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "int clk %u-bit %lu.%02luMHz inv=%u out=%u ddr=%u end=%u\n",
+                 (unsigned)config.bus_width,
+                 (unsigned long)(clk_cfg.bus_clk_hz / 1000000),
+                 (unsigned long)((clk_cfg.bus_clk_hz % 1000000) / 10000),
+                 config.clk_invert, config.clk_out, config.ddr, config.endian);
+        Fx3UartTxString(buf);
+      }
+#endif
       /* Store bus config for status queries */
       acq_bus_freq_hz = clk_cfg.bus_clk_hz;
       acq_sys_clk_hz = clk_cfg.sys_clk_hz;
       acq_gpif_div = clk_cfg.gpif_div;
       acq_pll_fbdiv = clk_cfg.pll_fbdiv;
-      acq_bus_width = bus_width;
+      acq_bus_width = config.bus_width;
     } else {
-      char buf[80];
-      snprintf(buf, sizeof(buf), "external clock, %u-bit\n", (unsigned)bus_width);
-      Fx3UartTxString(buf);
-
+#ifdef DEBUG_UART
+      {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "ext clk %u-bit inv=%u ddr=%u end=%u\n",
+                 (unsigned)config.bus_width,
+                 config.clk_invert, config.ddr, config.endian);
+        Fx3UartTxString(buf);
+      }
+#endif
       /* Store bus config for status queries (0 = external clock) */
       acq_bus_freq_hz = 0;
       acq_sys_clk_hz = 0;
       acq_gpif_div = 0;
       acq_pll_fbdiv = 0;
-      acq_bus_width = bus_width;
+      acq_bus_width = config.bus_width;
     }
-    start_acquisition(bus_width, clock_divisor_x2, use_internal_clock);
+    start_acquisition(clock_divisor_x2, &config);
     return;
   case CMD_GET_FW_VERSION:
     if (request_type !=
@@ -99,7 +115,9 @@ static void VendorCommand(uint8_t request_type, uint8_t request, uint16_t value,
       goto stall;
     if (value != 0 || index != 0 || length != sizeof(struct version_info))
       goto stall;
+#ifdef DEBUG_UART
     Fx3UartTxString("CMD_GET_FW_VERSION\n");
+#endif
     volatile struct version_info *vinfo = (volatile struct version_info *)DmaBuf;
     vinfo->major = 1;
     vinfo->minor = 3;
@@ -113,7 +131,9 @@ static void VendorCommand(uint8_t request_type, uint8_t request, uint16_t value,
       goto stall;
     if (value != 0 || index != 0 || length != 1)
       goto stall;
+#ifdef DEBUG_UART
     Fx3UartTxString("CMD_GET_FW_MODE\n");
+#endif
     DmaBuf[0] = 1;
     Fx3CacheCleanDCacheEntry(DmaBuf);
     Fx3UsbUnstallEp0(s);
@@ -123,7 +143,9 @@ static void VendorCommand(uint8_t request_type, uint8_t request, uint16_t value,
     if (request_type !=
 	(FX3_USB_REQTYPE_OUT | FX3_USB_REQTYPE_TYPE_VENDOR | FX3_USB_REQTYPE_TGT_DEVICE))
       goto stall;
+#ifdef DEBUG_UART
     Fx3UartTxString("CMD_STOP\n");
+#endif
     stop_acquisition();
     Fx3UsbUnstallEp0(s);
     return;
@@ -133,7 +155,9 @@ static void VendorCommand(uint8_t request_type, uint8_t request, uint16_t value,
       goto stall;
     if (value != 0 || index != 0 || length != sizeof(struct cmd_drop_stats))
       goto stall;
+#ifdef DEBUG_UART
     Fx3UartTxString("CMD_GET_DROP_STATS\n");
+#endif
     {
       volatile struct cmd_drop_stats *stats = (volatile struct cmd_drop_stats *)DmaBuf;
       stats->total_buffers = acq_total_buffers;
@@ -151,7 +175,9 @@ static void VendorCommand(uint8_t request_type, uint8_t request, uint16_t value,
       goto stall;
     if (value != 0 || index != 0 || length != 0)
       goto stall;
+#ifdef DEBUG_UART
     Fx3UartTxString("CMD_RESET_DROP_STATS\n");
+#endif
     reset_drop_stats();
     Fx3UsbUnstallEp0(s);
     return;
@@ -161,7 +187,9 @@ static void VendorCommand(uint8_t request_type, uint8_t request, uint16_t value,
       goto stall;
     if (value != 0 || index != 0 || length != sizeof(struct cmd_acq_status))
       goto stall;
+#ifdef DEBUG_UART
     Fx3UartTxString("CMD_GET_ACQ_STATUS\n");
+#endif
     {
       volatile struct cmd_acq_status *status = (volatile struct cmd_acq_status *)DmaBuf;
       /* Active if either acquisition or benchmark is running */
@@ -184,8 +212,10 @@ static void VendorCommand(uint8_t request_type, uint8_t request, uint16_t value,
       goto stall;
     if (value != 0 || index != 0 || length != 0)
       goto stall;
+#ifdef DEBUG_UART
     Fx3UartTxString("CMD_REBOOT_BOOTLOADER\n");
     Fx3UartTxFlush();
+#endif
     /* Stop acquisition if running */
     stop_acquisition();
     /* Hard reset to bootloader */
@@ -199,9 +229,101 @@ static void VendorCommand(uint8_t request_type, uint8_t request, uint16_t value,
     /* No data phase needed - just start benchmark mode */
     if (value != 0 || index != 0 || length != 0)
       goto stall;
+#ifdef DEBUG_UART
     Fx3UartTxString("CMD_START_BENCHMARK\n");
+#endif
     Fx3UsbUnstallEp0(s);
     start_benchmark();
+    return;
+
+  case CMD_I2C_WRITE:
+    /* I2C Write: wValue=slave_addr, wIndex=0, wLength=data_len
+     * Max 258 bytes: 2-byte EEPROM address + 256-byte page */
+    if (request_type !=
+	(FX3_USB_REQTYPE_OUT | FX3_USB_REQTYPE_TYPE_VENDOR | FX3_USB_REQTYPE_TGT_DEVICE))
+      goto stall;
+    if (length == 0 || length > 258 || index != 0)
+      goto stall;
+    Fx3UsbUnstallEp0(s);
+    Fx3UsbDmaDataOut(0, DmaBuf, length);
+    Fx3CacheInvalidateDCacheEntry(DmaBuf);
+    {
+      uint8_t slave_addr = value & 0x7F;
+      Fx3I2cStatus_t i2c_status = Fx3I2cWrite(slave_addr, (const uint8_t *)DmaBuf, length);
+#ifdef DEBUG_UART
+      if (i2c_status != I2C_RESULT_OK) {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "I2C write failed: %d\n", i2c_status);
+        Fx3UartTxString(buf);
+      }
+#endif
+      (void)i2c_status;
+    }
+    return;
+
+  case CMD_I2C_READ:
+    /* I2C Read: wValue=slave_addr, wIndex=read_len, wLength=read_len
+     * Max 256 bytes for full EEPROM page read */
+    if (request_type !=
+	(FX3_USB_REQTYPE_IN | FX3_USB_REQTYPE_TYPE_VENDOR | FX3_USB_REQTYPE_TGT_DEVICE))
+      goto stall;
+    if (length == 0 || length > 256 || index != length)
+      goto stall;
+#ifdef DEBUG_UART
+    Fx3UartTxString("CMD_I2C_READ\n");
+#endif
+    {
+      uint8_t slave_addr = value & 0x7F;
+      Fx3I2cStatus_t i2c_status = Fx3I2cRead(slave_addr, (uint8_t *)DmaBuf, length);
+      if (i2c_status != I2C_RESULT_OK) {
+#ifdef DEBUG_UART
+        char buf[48];
+        snprintf(buf, sizeof(buf), "I2C read failed: %d\n", i2c_status);
+        Fx3UartTxString(buf);
+#endif
+        goto stall;
+      }
+      Fx3CacheCleanDCacheEntry(DmaBuf);
+      Fx3UsbUnstallEp0(s);
+      Fx3UsbDmaDataIn(0, DmaBuf, length);
+    }
+    return;
+
+  case CMD_I2C_WRITE_READ:
+    /* I2C Write-then-Read: wValue=slave_addr, wIndex=write_len|(read_len<<8), wLength=read_len
+     * First receive write_len bytes, then perform I2C write-read, return read_len bytes */
+    if (request_type !=
+	(FX3_USB_REQTYPE_IN | FX3_USB_REQTYPE_TYPE_VENDOR | FX3_USB_REQTYPE_TGT_DEVICE))
+      goto stall;
+    {
+      uint8_t write_len = index & 0xFF;
+      uint8_t read_len = (index >> 8) & 0xFF;
+      if (write_len == 0 || write_len > 8 || read_len == 0 || read_len > 60 || length != read_len)
+        goto stall;
+#ifdef DEBUG_UART
+      Fx3UartTxString("CMD_I2C_WRITE_READ\n");
+#endif
+      uint8_t slave_addr = value & 0x7F;
+      /* For write-read, we need write data. Use a simple approach:
+       * wValue high byte can carry 1 byte of register address for common case */
+      uint8_t reg_addr = (value >> 8) & 0xFF;
+      uint8_t write_buf[8];
+      write_buf[0] = reg_addr;
+      /* For multi-byte writes, additional bytes would need different encoding */
+      Fx3I2cStatus_t i2c_status = Fx3I2cWriteRead(slave_addr, write_buf, 1,
+                                                   (uint8_t *)DmaBuf, read_len);
+      if (i2c_status != I2C_RESULT_OK) {
+#ifdef DEBUG_UART
+        char buf[48];
+        snprintf(buf, sizeof(buf), "I2C write-read failed: %d\n", i2c_status);
+        Fx3UartTxString(buf);
+#endif
+        goto stall;
+      }
+      Fx3CacheCleanDCacheEntry(DmaBuf);
+      Fx3UsbUnstallEp0(s);
+      Fx3UsbDmaDataIn(0, DmaBuf, read_len);
+    }
     return;
   }
  stall:
@@ -211,12 +333,16 @@ static void VendorCommand(uint8_t request_type, uint8_t request, uint16_t value,
 static void SetupData(uint8_t request_type, uint8_t request, uint16_t value,
 		      uint16_t index, uint16_t length, Fx3UsbSpeed_t s)
 {
-  char buf[64];
-  snprintf(buf, sizeof(buf),
-	   "req: %02x %02x value: %04x index: %04x length: %04x\n",
-	   (unsigned)request_type, (unsigned)request,
-	   (unsigned)value, (unsigned)index, (unsigned)length);
-  Fx3UartTxString(buf);
+#ifdef DEBUG_UART
+  {
+    char buf[64];
+    snprintf(buf, sizeof(buf),
+             "req: %02x %02x value: %04x index: %04x length: %04x\n",
+             (unsigned)request_type, (unsigned)request,
+             (unsigned)value, (unsigned)index, (unsigned)length);
+    Fx3UartTxString(buf);
+  }
+#endif
 
   if ((request_type & FX3_USB_REQTYPE_TYPE_MASK) == FX3_USB_REQTYPE_TYPE_VENDOR) {
     VendorCommand(request_type, request, value, index, length, s);
@@ -284,7 +410,9 @@ static void SetupData(uint8_t request_type, uint8_t request, uint16_t value,
         value == 0 && request == FX3_USB_STD_REQUEST_CLEAR_FEATURE) {
       uint8_t ep_num = index & 0x0F;
       if (ep_num == 2) {
+#ifdef DEBUG_UART
         Fx3UartTxString("CLEAR_FEATURE EP2\n");
+#endif
         /* Minimal approach: Don't touch DMA at all.
          *
          * Our GPIF is continuously sampling data into DMA buffers which
@@ -354,7 +482,9 @@ int main(void)
   *(volatile uint32_t *)(void *)0x400020e8 = 0;
   Fx3GctlInitIoMatrix(FX3_GCTL_ALTFUNC_GPIF32BIT_UART_I2S);
   Fx3UartInit(115200, FX3_UART_NO_PARITY, FX3_UART_1_STOP_BIT);
+  Fx3I2cInit(FX3_I2C_400KHZ);
 
+#ifdef DEBUG_UART
   /* One-time clock source debug: show FSLC and derived PLL reference clock. */
   {
     uint32_t fslc = Fx3GctlGetPllFslc();
@@ -368,6 +498,7 @@ int main(void)
 
   Fx3UartTxString("\nGood moaning!\n");
   Fx3UartTxFlush();
+#endif
 
   // Fx3GpioInitClock();
   // Fx3GpioSetupSimple(45,

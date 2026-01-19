@@ -2,8 +2,9 @@
 #define ACQUISITION_H
 
 #include <stdint.h>
+#include "command.h"
 
-extern void start_acquisition(uint8_t bits, uint16_t clock_divisor_x2, uint8_t use_internal_clock);
+extern void start_acquisition(uint16_t clock_divisor_x2, const struct acq_config *config);
 extern void start_benchmark(void);
 extern void stop_acquisition(void);
 extern void poll_acquisition(void);

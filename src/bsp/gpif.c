@@ -30,6 +30,9 @@
 #include <rdb/vic.h>
 #include <stdio.h>
 
+/* Uncomment to enable UART debug output (costs ~1KB flash) */
+// #define DEBUG_UART
+
 /* GPIF/PIB error counter - exported for stats reporting */
 volatile uint32_t gpif_error_count = 0;
 
@@ -58,11 +61,13 @@ static void Fx3GpifPibIsr(void)
 
 void Fx3GpifStart(uint8_t state, uint8_t alpha)
 {
+#ifdef DEBUG_UART
   {
     char _start_dbg[128];
     snprintf(_start_dbg, sizeof(_start_dbg), "Fx3GpifStart: state=%u alpha=%u\n", (unsigned)state, (unsigned)alpha);
     Fx3UartTxString(_start_dbg);
   }
+#endif
   Fx3WriteReg32(FX3_GPIF_INTR, Fx3ReadReg32(FX3_GPIF_INTR));
   Fx3WriteReg32(FX3_GPIF_INTR_MASK,
 		FX3_GPIF_INTR_MASK_GPIF_INTR | FX3_GPIF_INTR_MASK_GPIF_DONE);
@@ -79,7 +84,9 @@ void Fx3GpifStart(uint8_t state, uint8_t alpha)
   Fx3SetReg32(FX3_GPIF_WAVEFORM_SWITCH,
 	      FX3_GPIF_WAVEFORM_SWITCH_SWITCH_NOW |
 	      FX3_GPIF_WAVEFORM_SWITCH_WAVEFORM_SWITCH);
+#ifdef DEBUG_UART
   Fx3UartTxString("Fx3GpifStart: waveform switch requested\n");
+#endif
 }
 
 void Fx3GpifStop(void)
@@ -168,11 +175,13 @@ void Fx3GpifConfigureCompat(const Fx3GpifWaveformCompat_t *waveforms,
 
 void Fx3GpifPibStart(uint16_t clock_divisor_x2)
 {
+#ifdef DEBUG_UART
   {
     char _gpif_dbg[128];
     snprintf(_gpif_dbg, sizeof(_gpif_dbg), "Fx3GpifPibStart: clock_divisor_x2=%u\n", (unsigned)clock_divisor_x2);
     Fx3UartTxString(_gpif_dbg);
   }
+#endif
   Fx3WriteReg32(FX3_GCTL_PIB_CORE_CLK,
 		(((clock_divisor_x2 >> 1)-1) << FX3_GCTL_PIB_CORE_CLK_DIV_SHIFT) |
 		(3UL << FX3_GCTL_PIB_CORE_CLK_SRC_SHIFT));
@@ -209,11 +218,15 @@ void Fx3GpifPibStart(uint16_t clock_divisor_x2)
     Fx3UtilDelayUs(1);
     while(!(Fx3ReadReg32(FX3_PIB_DLL_CTRL) & FX3_PIB_DLL_CTRL_DLL_STAT))
       ;
+#ifdef DEBUG_UART
     Fx3UartTxString("Fx3GpifPibStart: DLL locked (HIGH_FREQ)\n");
+#endif
   } else {
     /* Lower frequencies - disable DLL to avoid timing issues */
     Fx3WriteReg32(FX3_PIB_DLL_CTRL, 0);
+#ifdef DEBUG_UART
     Fx3UartTxString("Fx3GpifPibStart: DLL disabled\n");
+#endif
   }
 
   Fx3WriteReg32(FX3_VIC_VEC_ADDRESS + (FX3_IRQ_GPIF_CORE<<2), Fx3GpifPibIsr);

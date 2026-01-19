@@ -285,7 +285,14 @@ int main(int argc, char **argv) {
     g_counter_initialized = false;
 
     /* Start firmware-side acquisition */
-    ret = fx3_start_acquisition(g_handle, bus_mhz, bus_width, 1 /* internal clock */);
+    struct fx3_acq_config acq_config = {
+        .bus_width = bus_width,
+        .clk_invert = 1,
+        .internal_clk = 1,
+        .clk_out = 1,
+    };
+    
+    ret = fx3_start_acquisition(g_handle, bus_mhz, &acq_config);
     if (ret != 0) {
         fprintf(stderr, "Failed to start acquisition\n");
         fx3_close(g_handle);

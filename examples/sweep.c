@@ -217,7 +217,14 @@ static test_result_t test_frequency(int freq_mhz, int bus_width) {
     g_counter_initialized = false;
 
     /* Start firmware-side acquisition */
-    int ret = fx3_start_acquisition(g_handle, freq_mhz, bus_width, 1 /* internal clock */);
+    struct fx3_acq_config acq_config = {
+        .bus_width = bus_width,
+        .clk_invert = 1,
+        .internal_clk = 1,
+        .clk_out = 1,
+    };
+    
+    int ret = fx3_start_acquisition(g_handle, freq_mhz, &acq_config);
     if (ret != 0) {
         result.error_msg = "Failed to start acquisition";
         return result;

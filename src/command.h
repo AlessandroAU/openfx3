@@ -1,3 +1,8 @@
+#ifndef COMMAND_H
+#define COMMAND_H
+
+#include <stdint.h>
+
 #define CMD_GET_FW_VERSION		0xb0
 #define CMD_START			0xb1
 #define CMD_GET_FW_MODE			0xb2
@@ -7,16 +12,29 @@
 #define CMD_GET_ACQ_STATUS		0xb6
 #define CMD_REBOOT_BOOTLOADER		0xb7
 #define CMD_START_BENCHMARK		0xb8
+#define CMD_I2C_WRITE			0xb9
+#define CMD_I2C_READ			0xba
+#define CMD_I2C_WRITE_READ		0xbb
 
 struct version_info {
 	uint8_t major;
 	uint8_t minor;
 };
 
+/* Acquisition configuration flags (directly maps to GPIF_CONFIG register bits) */
+struct acq_config {
+	uint8_t bus_width;     /* Bus width: 8, 16, 24, or 32 bits */
+	uint8_t internal_clk:1;/* Use internal clock (1) or external clock (0) */
+	uint8_t clk_invert:1;  /* Sample on falling edge instead of rising */
+	uint8_t clk_out:1;     /* Output clock on CLK pin (internal clock only) */
+	uint8_t ddr:1;         /* DDR mode: sample on both clock edges */
+	uint8_t endian:1;      /* Swap byte order (big-endian) */
+	uint8_t reserved:3;    /* Reserved for future use */
+};
+
 struct cmd_start_acquisition {
-	uint8_t bus_mhz;    /* GPIF bus clock in MHz (e.g., 20, 40, 65, 80, 100) */
-	uint8_t bus_width;  /* Bus width in bits (8, 16, 24, or 32) */
-	uint8_t reserved;   /* Reserved for future use, set to 0 */
+	uint8_t bus_mhz;          /* GPIF bus clock in MHz (0=external clock) */
+	struct acq_config config; /* Acquisition configuration */
 };
 
 struct cmd_drop_stats {
@@ -36,3 +54,5 @@ struct cmd_acq_status {
 	uint16_t gpif_div;     /* GPIF divider register value */
 	uint16_t reserved2;    /* Padding for alignment */
 };
+
+#endif /* COMMAND_H */
