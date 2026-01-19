@@ -21,7 +21,7 @@
 //65520
 
 #define BENCHMARK_BUFFER_SIZE   FX3_DMA_POOL_BUFFER_SIZE
-#define BENCHMARK_NUM_BUFFERS   12
+#define BENCHMARK_NUM_BUFFERS   8
 
 /* Stats counter */
 volatile uint64_t benchmark_total_buffers = 0;
