@@ -31,7 +31,7 @@
 #include <stdio.h>
 
 /* Uncomment to enable UART debug output (costs ~1KB flash) */
-// #define DEBUG_UART
+#define DEBUG_UART
 
 /* GPIF/PIB error counter - exported for stats reporting */
 volatile uint32_t gpif_error_count = 0;
@@ -43,16 +43,33 @@ static void Fx3GpifPibIsr(void)
   /* Check for actual errors before clearing */
   uint32_t pib_intr = Fx3ReadReg32(FX3_PIB_INTR);
   uint32_t pib_error = Fx3ReadReg32(FX3_PIB_ERROR);
+  uint32_t gpif_intr = Fx3ReadReg32(FX3_GPIF_INTR);
 
   /* Count GPIF or PIB errors */
   if (pib_intr & (FX3_PIB_INTR_GPIF_ERR | FX3_PIB_INTR_PIB_ERR)) {
     gpif_error_count++;
+#ifdef DEBUG_UART
+    /* Only print first few errors to avoid flooding UART */
+    if (gpif_error_count <= 10) {
+      char buf[128];
+      uint8_t gpif_err_code = (pib_error & FX3_PIB_ERROR_GPIF_ERR_CODE_MASK) >> FX3_PIB_ERROR_GPIF_ERR_CODE_SHIFT;
+      uint8_t pib_err_code = (pib_error & FX3_PIB_ERROR_PIB_ERR_CODE_MASK) >> FX3_PIB_ERROR_PIB_ERR_CODE_SHIFT;
+      snprintf(buf, sizeof(buf), "GPIF ERR #%lu: intr=0x%08lx err=0x%04lx gpif_code=%u pib_code=%u gpif_intr=0x%08lx\n",
+               (unsigned long)gpif_error_count,
+               (unsigned long)pib_intr,
+               (unsigned long)pib_error,
+               (unsigned)gpif_err_code,
+               (unsigned)pib_err_code,
+               (unsigned long)gpif_intr);
+      Fx3UartTxString(buf);
+    }
+#endif
   }
 
   /* Clear all PIB/GPIF interrupts and errors */
   Fx3WriteReg32(FX3_PIB_INTR, pib_intr);
   Fx3WriteReg32(FX3_PIB_ERROR, pib_error);
-  Fx3WriteReg32(FX3_GPIF_INTR, Fx3ReadReg32(FX3_GPIF_INTR));
+  Fx3WriteReg32(FX3_GPIF_INTR, gpif_intr);
 
   /* EOI */
   Fx3WriteReg32(FX3_VIC_ADDRESS, 0);

@@ -37,7 +37,7 @@ $(BUILD) :
 
 clean :
 	rm -rf $(BUILD)
-	rm -f *.exe stream sweep benchmark i2cscan i2ctest i2cdump i2cprogram
+	rm -f *.exe stream sweep benchmark i2cscan i2ctest i2cdump i2cprogram fpga_config
 
 -include $(BUILD_OBJS:.o=.d)
 
@@ -90,7 +90,7 @@ $(BUILD)/lib_acquisition.o : lib/src/acquisition.c | $(BUILD)
 # Prefixed with ex_ to avoid collision with firmware objects
 # ------------------------------------------------------------------------------
 
-examples : $(BUILD)/stream $(BUILD)/sweep $(BUILD)/benchmark $(BUILD)/i2cscan $(BUILD)/i2ctest $(BUILD)/i2cdump $(BUILD)/i2cprogram
+examples : $(BUILD)/stream $(BUILD)/sweep $(BUILD)/benchmark $(BUILD)/i2cscan $(BUILD)/i2ctest $(BUILD)/i2cdump $(BUILD)/i2cprogram $(BUILD)/fpga_config
 
 $(BUILD)/stream : $(BUILD)/ex_stream.o $(LIBOPENFX3)
 	$(HOST_CC) -o $@ $< -L$(BUILD) -lopenfx3 $(HOST_LDFLAGS)
@@ -140,4 +140,11 @@ $(BUILD)/i2cprogram : $(BUILD)/ex_i2cprogram.o $(LIBOPENFX3)
 	cp $@ .
 
 $(BUILD)/ex_i2cprogram.o : examples/i2cprogram.c | $(BUILD)
+	$(HOST_CC) $(HOST_CFLAGS) -c -o $@ $<
+
+$(BUILD)/fpga_config : $(BUILD)/ex_fpga_config.o $(LIBOPENFX3)
+	$(HOST_CC) -o $@ $< -L$(BUILD) -lopenfx3 $(HOST_LDFLAGS)
+	cp $@ .
+
+$(BUILD)/ex_fpga_config.o : examples/fpga_config.c | $(BUILD)
 	$(HOST_CC) $(HOST_CFLAGS) -c -o $@ $<

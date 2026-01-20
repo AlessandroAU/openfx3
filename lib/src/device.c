@@ -498,7 +498,7 @@ int fx3_get_acq_status(libusb_device_handle *handle, struct fx3_acq_status *stat
 }
 
 int fx3_wait_acquisition_ready(libusb_device_handle *handle, int timeout_ms) {
-    const int poll_interval_ms = 1;  /* Poll every 1ms */
+    const int poll_interval_ms = 10;  /* Poll every 1ms */
     platform_timer_t timer;
     struct fx3_acq_status status;
 

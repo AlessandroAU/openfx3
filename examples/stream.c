@@ -216,7 +216,7 @@ int main(int argc, char **argv) {
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             printf("Usage: %s [options]\n", argv[0]);
             printf("\nOptions:\n");
-            printf("  -f <MHz>            Bus clock in MHz (default: 100)\n");
+            printf("  -f <MHz>            Bus clock in MHz (default: 100, 0=external clock)\n");
             printf("  -w <bits>           Bus width: 8, 16, 24, 32 (default: 32)\n");
             printf("  --validate-all      Validate every 32-bit counter in stream\n");
             printf("  --validate-headers  Validate only first counter per DMA buffer\n");
@@ -288,8 +288,8 @@ int main(int argc, char **argv) {
     struct fx3_acq_config acq_config = {
         .bus_width = bus_width,
         .clk_invert = 1,
-        .internal_clk = 1,
-        .clk_out = 1,
+        .internal_clk = (bus_mhz > 0) ? 1 : 0,  /* External clock when -f 0 */
+        .clk_out = (bus_mhz > 0) ? 1 : 0,       /* No clockout for external clock */
     };
     
     ret = fx3_start_acquisition(g_handle, bus_mhz, &acq_config);
@@ -310,17 +310,21 @@ int main(int argc, char **argv) {
 
     /* Query and print actual bus configuration, then print table header */
     struct fx3_acq_status acq_status;
-    if (fx3_get_acq_status(g_handle, &acq_status) == 0 && acq_status.bus_freq_hz > 0) {
-        printf("Starting acquisition: %u-bit @ %lu.%02lu MHz (requested %d MHz)\n",
-               acq_status.bus_width,
-               (unsigned long)(acq_status.bus_freq_hz / 1000000),
-               (unsigned long)((acq_status.bus_freq_hz % 1000000) / 10000),
-               bus_mhz);
-        printf("Clock config: SysClk=%lu.%01lu MHz, FBDIV=%u, DIV=%u\n",
-               (unsigned long)(acq_status.sys_clk_hz / 1000000),
-               (unsigned long)((acq_status.sys_clk_hz % 1000000) / 100000),
-               acq_status.pll_fbdiv,
-               acq_status.gpif_div);
+    if (fx3_get_acq_status(g_handle, &acq_status) == 0) {
+        if (acq_status.bus_freq_hz > 0) {
+            printf("Starting acquisition: %u-bit @ %lu.%02lu MHz (requested %d MHz)\n",
+                   acq_status.bus_width,
+                   (unsigned long)(acq_status.bus_freq_hz / 1000000),
+                   (unsigned long)((acq_status.bus_freq_hz % 1000000) / 10000),
+                   bus_mhz);
+            printf("Clock config: SysClk=%lu.%01lu MHz, FBDIV=%u, DIV=%u\n",
+                   (unsigned long)(acq_status.sys_clk_hz / 1000000),
+                   (unsigned long)((acq_status.sys_clk_hz % 1000000) / 100000),
+                   acq_status.pll_fbdiv,
+                   acq_status.gpif_div);
+        } else {
+            printf("Starting acquisition: %u-bit, external clock\n", acq_status.bus_width);
+        }
     } else {
         printf("Starting acquisition: %d MHz, %d-bit bus\n", bus_mhz, bus_width);
     }
