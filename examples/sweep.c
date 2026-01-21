@@ -219,7 +219,7 @@ static test_result_t test_frequency(int freq_mhz, int bus_width) {
     /* Start firmware-side acquisition */
     struct fx3_acq_config acq_config = {
         .bus_width = bus_width,
-        .clk_invert = 1,
+        .clk_invert = 0,
         .internal_clk = 1,
         .clk_out = 1,
     };

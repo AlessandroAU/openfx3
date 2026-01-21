@@ -1,13 +1,13 @@
 /**
  * @file acquisition.c
- * @brief FX3 GPIF Continuous Streaming with Quad Socket Seamless Transfers
+ * @brief FX3 GPIF Continuous Streaming with Dual Socket Transfers
  *
- * Continuously samples data from GPIF bus into DMA buffers using four threads
- * that cycle in round-robin to maintain seamless data flow to USB.
+ * Continuously samples data from GPIF bus into DMA buffers using two threads
+ * that alternate to maintain seamless data flow to USB.
  *
- * Uses quad socket architecture where:
- * - Sockets 0-3 each have their own independent descriptor chains
- * - While one socket transfers data, the others load their next descriptors
+ * Uses dual socket architecture where:
+ * - Sockets 0-1 each have their own independent descriptor chains
+ * - While one socket transfers data, the other loads its next descriptor
  * - This eliminates sample loss during thread/socket transitions
  *
  * Assumes DMA is always ready (sufficient buffering). If DMA falls behind,
@@ -123,18 +123,16 @@ static const uint16_t functions[] = {
 };
 
 /*
- * GPIF State Machine - Continuous streaming with 4 threads using DMA watermark
+ * GPIF State Machine - Continuous streaming with 2 threads using DMA watermark
  *
  * This state machine continuously samples data from the GPIF bus and pushes
- * it to DMA buffers using a round-robin architecture with four threads.
+ * it to DMA buffers using a ping-pong architecture with two threads.
  *
  * State Machine Flow:
  *
- *   State 0 (Thread 0) -> State 1 (Thread 1) -> State 2 (Thread 2) -> State 3 (Thread 3)
- *        ^                                                                    |
- *        +--------------------------------------------------------------------+
+ *   State 0 (Thread 0) <-> State 1 (Thread 1)
  *
- * Each state: sample+push using its thread, transition to next on DMA_WM (buffer full)
+ * Each state: sample+push using its thread, transition to other on DMA_WM (buffer full)
  *
  * Trigger: DMA_WM (watermark) signals when buffer is nearly full
  * Actions: Sample DIN (alpha), Push to write queue (beta), select thread (beta)
@@ -151,7 +149,7 @@ static const Fx3GpifWaveform_t waveforms[] = {
         .left = 1, .right = 0
     },
 
-    /* State 1: Thread 1 - sample+push, on DMA_WM go to state 2 */
+    /* State 1: Thread 1 - sample+push, on DMA_WM go to state 0 */
     [1] = {
         .state = GPIF_STATE(1,
             FX3_GPIF_LAMBDA_INDEX_DMA_WM, 0, 0, 0,
@@ -159,29 +157,7 @@ static const Fx3GpifWaveform_t waveforms[] = {
             FX3_GPIF_ALPHA_SAMPLE_DIN, FX3_GPIF_ALPHA_SAMPLE_DIN,
             FX3_GPIF_BETA_THREAD_1 | FX3_GPIF_BETA_WQ_PUSH,
             0, 0),
-        .left = 2, .right = 1
-    },
-
-    /* State 2: Thread 2 - sample+push, on DMA_WM go to state 3 */
-    [2] = {
-        .state = GPIF_STATE(2,
-            FX3_GPIF_LAMBDA_INDEX_DMA_WM, 0, 0, 0,
-            2, 0,
-            FX3_GPIF_ALPHA_SAMPLE_DIN, FX3_GPIF_ALPHA_SAMPLE_DIN,
-            FX3_GPIF_BETA_THREAD_2 | FX3_GPIF_BETA_WQ_PUSH,
-            0, 0),
-        .left = 3, .right = 2
-    },
-
-    /* State 3: Thread 3 - sample+push, on DMA_WM go to state 0 */
-    [3] = {
-        .state = GPIF_STATE(3,
-            FX3_GPIF_LAMBDA_INDEX_DMA_WM, 0, 0, 0,
-            2, 0,
-            FX3_GPIF_ALPHA_SAMPLE_DIN, FX3_GPIF_ALPHA_SAMPLE_DIN,
-            FX3_GPIF_BETA_THREAD_3 | FX3_GPIF_BETA_WQ_PUSH,
-            0, 0),
-        .left = 0, .right = 3
+        .left = 0, .right = 1
     },
 };
 
@@ -215,29 +191,15 @@ static Fx3GpifRegisters_t gpif_registers = {
             | (BURST_SIZE_LOG2 << FX3_GPIF_THREAD_CONFIG_BURST_SIZE_SHIFT)
             | (1UL << FX3_GPIF_THREAD_CONFIG_THREAD_SOCK_SHIFT)
             | (WATERMARK_LEVEL << FX3_GPIF_THREAD_CONFIG_WATERMARK_SHIFT),
-
-        [2] = FX3_GPIF_THREAD_CONFIG_ENABLE
-            | (BURST_SIZE_LOG2 << FX3_GPIF_THREAD_CONFIG_BURST_SIZE_SHIFT)
-            | (2UL << FX3_GPIF_THREAD_CONFIG_THREAD_SOCK_SHIFT)
-            | (WATERMARK_LEVEL << FX3_GPIF_THREAD_CONFIG_WATERMARK_SHIFT),
-
-        [3] = FX3_GPIF_THREAD_CONFIG_ENABLE
-            | (BURST_SIZE_LOG2 << FX3_GPIF_THREAD_CONFIG_BURST_SIZE_SHIFT)
-            | (3UL << FX3_GPIF_THREAD_CONFIG_THREAD_SOCK_SHIFT)
-            | (WATERMARK_LEVEL << FX3_GPIF_THREAD_CONFIG_WATERMARK_SHIFT),
     },
-
-    //.beta_deassert = 0xFFFFFFC1,
 };
 
 /*
- * Setup 4-socket descriptor chains for seamless transfers.
+ * Setup 2-socket descriptor chains for seamless transfers.
  *
- * Buffer allocation (with NUM_BUFFERS_PER_SOCKET=6, NUM_SOCKETS=4):
- *   Socket 0: buffers 0, 4, 8, 12, 16, 20
- *   Socket 1: buffers 1, 5, 9, 13, 17, 21
- *   Socket 2: buffers 2, 6, 10, 14, 18, 22
- *   Socket 3: buffers 3, 7, 11, 15, 19, 23
+ * Buffer allocation (with NUM_BUFFERS_PER_SOCKET=2, NUM_SOCKETS=2):
+ *   Socket 0: buffers 0, 2
+ *   Socket 1: buffers 1, 3
  *
  * Each socket has its own circular chain of descriptors.
  * The consumer (USB) sees all buffers in order: 0, 1, 2, 3, ...

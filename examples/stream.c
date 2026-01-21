@@ -287,7 +287,7 @@ int main(int argc, char **argv) {
     /* Start firmware-side acquisition */
     struct fx3_acq_config acq_config = {
         .bus_width = bus_width,
-        .clk_invert = 1,
+        .clk_invert = 0,
         .internal_clk = (bus_mhz > 0) ? 1 : 0,  /* External clock when -f 0 */
         .clk_out = (bus_mhz > 0) ? 1 : 0,       /* No clockout for external clock */
     };
