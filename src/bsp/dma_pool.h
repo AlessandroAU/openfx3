@@ -2,13 +2,13 @@
 #define BSP_DMA_POOL_H_
 
 #include <stdint.h>
-
+// CY_FX_SLFIFO_DMA_BUF_SIZE = 48 and they multiply by endpoint size (1024 for SS), so DMA buffer = 48 * 1024 = 49152 bytes.
 /*
  * Shared DMA pool used by acquisition and benchmark.
  * Only one mode runs at a time, so buffers/descriptors can be reused.
  */
 #define FX3_DMA_POOL_SOCKETS            2
-#define FX3_DMA_POOL_BUFFERS_PER_SOCKET 5
+#define FX3_DMA_POOL_BUFFERS_PER_SOCKET 6
 #define FX3_DMA_POOL_COUNT              (FX3_DMA_POOL_SOCKETS * FX3_DMA_POOL_BUFFERS_PER_SOCKET)
 #define FX3_DMA_POOL_BUFFER_SIZE        32768
 

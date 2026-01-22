@@ -48,11 +48,11 @@ struct cmd_acq_status {
 	uint8_t active;        /* 1 if acquisition is running, 0 otherwise */
 	uint8_t bus_width;     /* Configured bus width in bits */
 	uint8_t pll_fbdiv;     /* PLL feedback divider used (20-27) */
-	uint8_t reserved;      /* Reserved for future use */
+	uint8_t dma_buffer_count; /* Number of DMA buffers in pool */
 	uint32_t bus_freq_hz;  /* Actual bus clock frequency in Hz */
 	uint32_t sys_clk_hz;   /* System clock frequency in Hz */
 	uint16_t gpif_div;     /* GPIF divider register value */
-	uint16_t reserved2;    /* Padding for alignment */
+	uint16_t dma_buffer_size; /* Size of each DMA buffer in bytes (max 64KB) */
 };
 
 #endif /* COMMAND_H */

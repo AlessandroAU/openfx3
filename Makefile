@@ -92,12 +92,12 @@ $(BUILD)/lib_acquisition.o : lib/src/acquisition.c | $(BUILD)
 
 examples : $(BUILD)/stream $(BUILD)/sweep $(BUILD)/benchmark $(BUILD)/i2cscan $(BUILD)/i2ctest $(BUILD)/i2cdump $(BUILD)/i2cprogram $(BUILD)/fpga_config
 
-$(BUILD)/stream : $(BUILD)/ex_stream.o $(LIBOPENFX3)
-	$(HOST_CC) -o $@ $< -L$(BUILD) -lopenfx3 $(HOST_LDFLAGS)
+$(BUILD)/stream : $(BUILD)/ex_stream.o $(BUILD)/ex_counter_validation.o $(LIBOPENFX3)
+	$(HOST_CC) -o $@ $(BUILD)/ex_stream.o $(BUILD)/ex_counter_validation.o -L$(BUILD) -lopenfx3 $(HOST_LDFLAGS)
 	cp $@ .
 
-$(BUILD)/sweep : $(BUILD)/ex_sweep.o $(LIBOPENFX3)
-	$(HOST_CC) -o $@ $< -L$(BUILD) -lopenfx3 $(HOST_LDFLAGS)
+$(BUILD)/sweep : $(BUILD)/ex_sweep.o $(BUILD)/ex_counter_validation.o $(LIBOPENFX3)
+	$(HOST_CC) -o $@ $(BUILD)/ex_sweep.o $(BUILD)/ex_counter_validation.o -L$(BUILD) -lopenfx3 $(HOST_LDFLAGS)
 	cp $@ .
 
 $(BUILD)/benchmark : $(BUILD)/ex_benchmark.o $(LIBOPENFX3)
@@ -106,10 +106,13 @@ $(BUILD)/benchmark : $(BUILD)/ex_benchmark.o $(LIBOPENFX3)
 
 # Example object files
 $(BUILD)/ex_stream.o : examples/stream.c | $(BUILD)
-	$(HOST_CC) $(HOST_CFLAGS) -c -o $@ $<
+	$(HOST_CC) $(HOST_CFLAGS) -Iexamples -c -o $@ $<
 
 $(BUILD)/ex_sweep.o : examples/sweep.c | $(BUILD)
-	$(HOST_CC) $(HOST_CFLAGS) -c -o $@ $<
+	$(HOST_CC) $(HOST_CFLAGS) -Iexamples -c -o $@ $<
+
+$(BUILD)/ex_counter_validation.o : examples/counter_validation.c | $(BUILD)
+	$(HOST_CC) $(HOST_CFLAGS) -Iexamples -c -o $@ $<
 
 $(BUILD)/ex_benchmark.o : examples/benchmark.c | $(BUILD)
 	$(HOST_CC) $(HOST_CFLAGS) -c -o $@ $<

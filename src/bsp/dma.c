@@ -189,22 +189,48 @@ void Fx3DmaSimpleTransferWrite(uint32_t socket, uint16_t descriptor,
   Fx3DmaWaitForEvent(socket, FX3_SCK_INTR_PRODUCE_EVENT);
 }
 
+// void Fx3DmaStartProducer(uint32_t socket, uint16_t descriptor,
+// 			 uint32_t size, uint32_t count)
+// {
+//   Fx3DmaTransferStart(socket, descriptor,
+// 		      FX3_SCK_STATUS_SUSP_TRANS	|
+// 		      FX3_SCK_STATUS_EN_PROD_EVENTS |
+// 		      FX3_SCK_STATUS_TRUNCATE,
+// 		      size, count);
+// }
+
 void Fx3DmaStartProducer(uint32_t socket, uint16_t descriptor,
 			 uint32_t size, uint32_t count)
 {
-  Fx3DmaTransferStart(socket, descriptor,
-		      FX3_SCK_STATUS_SUSP_TRANS	|
-		      FX3_SCK_STATUS_EN_PROD_EVENTS |
-		      FX3_SCK_STATUS_TRUNCATE,
-		      size, count);
+  /*
+   * For infinite/continuous transfers (size=0, count=0), TRUNCATE must be cleared.
+   * Cypress SDK clears TRUNCATE for producer sockets in many-to-one DMA channels.
+   * With TRUNCATE set on infinite transfers, the socket may not operate correctly.
+   */
+  uint32_t status = FX3_SCK_STATUS_SUSP_TRANS | FX3_SCK_STATUS_EN_PROD_EVENTS;
+  if (size != 0 || count != 0)
+    status |= FX3_SCK_STATUS_TRUNCATE;
+
+  Fx3DmaTransferStart(socket, descriptor, status, size, count);
 }
+
+// void Fx3DmaStartConsumer(uint32_t socket, uint16_t descriptor,
+// 			 uint32_t size, uint32_t count)
+// {
+//   Fx3DmaTransferStart(socket, descriptor,
+// 		      FX3_SCK_STATUS_SUSP_TRANS	|
+// 		      FX3_SCK_STATUS_EN_CONS_EVENTS |
+// 		      FX3_SCK_STATUS_TRUNCATE,
+// 		      size, count);
+// }
 
 void Fx3DmaStartConsumer(uint32_t socket, uint16_t descriptor,
 			 uint32_t size, uint32_t count)
 {
-  Fx3DmaTransferStart(socket, descriptor,
-		      FX3_SCK_STATUS_SUSP_TRANS	|
-		      FX3_SCK_STATUS_EN_CONS_EVENTS |
-		      FX3_SCK_STATUS_TRUNCATE,
-		      size, count);
+  /* For infinite transfers (size=0, count=0), TRUNCATE must be cleared */
+  uint32_t status = FX3_SCK_STATUS_SUSP_TRANS | FX3_SCK_STATUS_EN_CONS_EVENTS;
+  if (size != 0 || count != 0)
+    status |= FX3_SCK_STATUS_TRUNCATE;
+
+  Fx3DmaTransferStart(socket, descriptor, status, size, count);
 }

@@ -488,11 +488,11 @@ int fx3_get_acq_status(libusb_device_handle *handle, struct fx3_acq_status *stat
     status->active = buf[0];
     status->bus_width = buf[1];
     status->pll_fbdiv = buf[2];
-    status->reserved = buf[3];
+    status->dma_buffer_count = buf[3];
     status->bus_freq_hz = buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24);
     status->sys_clk_hz = buf[8] | (buf[9] << 8) | (buf[10] << 16) | (buf[11] << 24);
     status->gpif_div = buf[12] | (buf[13] << 8);
-    status->reserved2 = buf[14] | (buf[15] << 8);
+    status->dma_buffer_size = buf[14] | (buf[15] << 8);
 
     return 0;
 }

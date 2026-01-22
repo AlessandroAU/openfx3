@@ -8,7 +8,7 @@ static Fx3DmaPoolOwner_t dma_pool_owner = FX3_DMA_POOL_OWNER_NONE;
 static uint8_t dma_pool_initialized = 0;
 
 static Fx3DmaPoolBuffer_t dma_pool_buffers[FX3_DMA_POOL_COUNT]
-    __attribute__((aligned(FX3_DMA_POOL_BUFFER_SIZE)));
+    __attribute__((aligned(32)));
 
 static uint16_t dma_pool_descriptors[FX3_DMA_POOL_COUNT];
 

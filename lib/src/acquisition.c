@@ -398,3 +398,62 @@ void fx3_acquisition_wait(fx3_acquisition_session_t *session) {
         sleep_ms(10);
     }
 }
+
+/* Default acquisition parameters */
+#define DEFAULT_BUFFERS_PER_TRANSFER  16  /* USB transfer = 16 DMA buffers */
+#define DEFAULT_NUM_TRANSFERS         16  /* 16 async transfers in flight */
+#define DEFAULT_TIMEOUT_MS            2000
+
+int fx3_acquisition_get_default_params(libusb_device_handle *handle,
+                                       struct fx3_acquisition_params *params_out) {
+    if (!handle || !params_out) {
+        return -1;
+    }
+
+    struct fx3_acq_status status;
+    if (fx3_get_acq_status(handle, &status) != 0) {
+        return -1;
+    }
+
+    /* Use firmware-reported DMA configuration */
+    int dma_buffer_size = status.dma_buffer_size;
+    int dma_buffer_count = status.dma_buffer_count;
+
+    /* Sanity check - firmware should report valid values */
+    if (dma_buffer_size == 0 || dma_buffer_count == 0) {
+        return -1;
+    }
+
+    params_out->dma_buffer_size = dma_buffer_size;
+    params_out->dma_buffer_count = dma_buffer_count;
+    params_out->transfer_size = dma_buffer_size * DEFAULT_BUFFERS_PER_TRANSFER;
+    params_out->num_transfers = DEFAULT_NUM_TRANSFERS;
+    params_out->timeout_ms = DEFAULT_TIMEOUT_MS;
+    /* Skip entire DMA pool to avoid stale data */
+    params_out->skip_bytes = (unsigned long long)dma_buffer_size * dma_buffer_count;
+
+    return 0;
+}
+
+int fx3_acquisition_create_simple(
+    libusb_device_handle *handle,
+    libusb_context *ctx,
+    fx3_acquisition_callback_t callback,
+    void *user_data,
+    fx3_acquisition_session_t **session_out)
+{
+    struct fx3_acquisition_params params;
+    if (fx3_acquisition_get_default_params(handle, &params) != 0) {
+        return -1;
+    }
+
+    return fx3_acquisition_create(handle, ctx,
+                                  params.transfer_size,
+                                  params.num_transfers,
+                                  params.timeout_ms,
+                                  0,  /* chunk_size: whole transfer */
+                                  params.skip_bytes,
+                                  callback,
+                                  user_data,
+                                  session_out);
+}

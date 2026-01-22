@@ -31,7 +31,7 @@
 #include <stdio.h>
 
 /* Uncomment to enable UART debug output (costs ~1KB flash) */
-#define DEBUG_UART
+// #define DEBUG_UART
 
 /* GPIF/PIB error counter - exported for stats reporting */
 volatile uint32_t gpif_error_count = 0;

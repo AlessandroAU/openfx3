@@ -162,4 +162,66 @@ int fx3_acquisition_is_running(fx3_acquisition_session_t *session);
  */
 void fx3_acquisition_wait(fx3_acquisition_session_t *session);
 
+/*
+ * Acquisition parameters for session creation.
+ * Use fx3_acquisition_get_default_params() to populate with recommended values.
+ */
+struct fx3_acquisition_params {
+    int transfer_size;              /* Bytes per USB transfer */
+    int num_transfers;              /* Number of async transfers in flight */
+    int timeout_ms;                 /* USB transfer timeout */
+    unsigned long long skip_bytes;  /* Initial bytes to skip (DMA pool size) */
+    int dma_buffer_size;            /* Firmware DMA buffer size (for reference) */
+    int dma_buffer_count;           /* Firmware DMA buffer count (for reference) */
+};
+
+/*
+ * Get recommended acquisition parameters from device.
+ *
+ * Queries the firmware for DMA configuration and calculates optimal
+ * host-side parameters. This ensures host configuration matches firmware.
+ *
+ * Recommended values:
+ *   - transfer_size: 16 DMA buffers per USB transfer
+ *   - num_transfers: 16 async transfers in flight
+ *   - timeout_ms: 2000ms
+ *   - skip_bytes: full DMA pool (all buffers * buffer size)
+ *
+ * Parameters:
+ *   handle     - Device handle
+ *   params_out - Receives recommended parameters
+ *
+ * Returns:
+ *   0 on success, -1 on failure
+ */
+int fx3_acquisition_get_default_params(libusb_device_handle *handle,
+                                       struct fx3_acquisition_params *params_out);
+
+/*
+ * Create acquisition session with default parameters.
+ *
+ * Convenience function that queries the device for optimal parameters
+ * and creates a session. Equivalent to:
+ *   fx3_acquisition_get_default_params(handle, &params);
+ *   fx3_acquisition_create(handle, ctx, params.transfer_size, params.num_transfers,
+ *                          params.timeout_ms, 0, params.skip_bytes, callback, user_data, session_out);
+ *
+ * Parameters:
+ *   handle      - Device handle (acquisition should already be started)
+ *   ctx         - libusb context
+ *   callback    - User callback function
+ *   user_data   - Passed to callback
+ *   session_out - Receives session handle
+ *
+ * Returns:
+ *   0 on success, -1 on failure
+ */
+int fx3_acquisition_create_simple(
+    libusb_device_handle *handle,
+    libusb_context *ctx,
+    fx3_acquisition_callback_t callback,
+    void *user_data,
+    fx3_acquisition_session_t **session_out
+);
+
 #endif /* FX3_ACQUISITION_H */

@@ -9,6 +9,7 @@
 #include <bsp/util.h>
 #include <bsp/regaccess.h>
 #include <bsp/i2c.h>
+#include <bsp/dma_pool.h>
 #include <rdb/uib.h>
 
 #include <string.h>
@@ -196,11 +197,11 @@ static void VendorCommand(uint8_t request_type, uint8_t request, uint16_t value,
       status->active = is_acquisition_active() || is_benchmark_active();
       status->bus_width = acq_bus_width;
       status->pll_fbdiv = acq_pll_fbdiv;
-      status->reserved = 0;
+      status->dma_buffer_count = FX3_DMA_POOL_COUNT;
       status->bus_freq_hz = acq_bus_freq_hz;
       status->sys_clk_hz = acq_sys_clk_hz;
       status->gpif_div = acq_gpif_div;
-      status->reserved2 = 0;
+      status->dma_buffer_size = FX3_DMA_POOL_BUFFER_SIZE;
     }
     Fx3CacheCleanDCacheEntry(DmaBuf);
     Fx3UsbUnstallEp0(s);

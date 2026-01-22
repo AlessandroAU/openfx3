@@ -11,9 +11,9 @@
  *   0x00: Control Register
  *         Bit 0: Clock Mode (0=slave/external, 1=master/generate)
  *         Bit 2:1: Counter Width (00=8bit, 01=16bit, 10=24bit, 11=32bit)
- *   0x01: Clock Divider Low Byte (master mode)
- *   0x02: Clock Divider High Byte (master mode)
- *         Output freq = 200MHz / (2 * (divider + 1))
+ *   0x01: Frequency Low Byte (master mode) - target frequency in MHz
+ *   0x02: Frequency High Byte (master mode)
+ *         DDS-based clock generation, supports 1-100 MHz in 1 MHz steps
  *   0x03: Status Register (read-only)
  *         Bit 0: Current clock mode
  *         Bit 1: PLL locked
@@ -79,36 +79,29 @@ static int fpga_read_reg(libusb_device_handle *handle, uint8_t reg, uint8_t *val
     return fx3_i2c_read(handle, FPGA_I2C_ADDR, value, 1);
 }
 
-/* Calculate divider from desired frequency in MHz */
-static uint16_t freq_to_divider(float freq_mhz) {
-    /* Output freq = 200MHz / (2 * (divider + 1))
-     * divider = (200MHz / (2 * freq)) - 1 */
-    if (freq_mhz <= 0) freq_mhz = 1;
+/* Convert frequency to register value
+ * FPGA uses DDS with 200MHz base clock - register value is direct MHz (1-100)
+ */
+static uint16_t freq_to_reg(float freq_mhz) {
+    if (freq_mhz < 1) freq_mhz = 1;
     if (freq_mhz > 100) freq_mhz = 100;
-
-    uint16_t div = (uint16_t)((200.0f / (2.0f * freq_mhz)) - 1.0f + 0.5f);
-    return div;
+    return (uint16_t)(freq_mhz + 0.5f);  /* Round to nearest integer */
 }
 
-/* Calculate actual frequency from divider */
-static float divider_to_freq(uint16_t divider) {
-    return 200.0f / (2.0f * (divider + 1));
-}
-
-/* Read and print current FPGA status */
-static int print_status(libusb_device_handle *handle) {
-    uint8_t ctrl, div_lo, div_hi, status;
+/* Read and print current FPGA status (utility for debugging) */
+static int __attribute__((unused)) print_status(libusb_device_handle *handle) {
+    uint8_t ctrl, freq_lo, freq_hi, status;
 
     if (fpga_read_reg(handle, REG_CONTROL, &ctrl) != 0) {
         fprintf(stderr, "Failed to read control register\n");
         return -1;
     }
-    if (fpga_read_reg(handle, REG_DIV_LO, &div_lo) != 0) {
-        fprintf(stderr, "Failed to read divider low register\n");
+    if (fpga_read_reg(handle, REG_DIV_LO, &freq_lo) != 0) {
+        fprintf(stderr, "Failed to read frequency low register\n");
         return -1;
     }
-    if (fpga_read_reg(handle, REG_DIV_HI, &div_hi) != 0) {
-        fprintf(stderr, "Failed to read divider high register\n");
+    if (fpga_read_reg(handle, REG_DIV_HI, &freq_hi) != 0) {
+        fprintf(stderr, "Failed to read frequency high register\n");
         return -1;
     }
     if (fpga_read_reg(handle, REG_STATUS, &status) != 0) {
@@ -116,8 +109,7 @@ static int print_status(libusb_device_handle *handle) {
         return -1;
     }
 
-    uint16_t divider = (div_hi << 8) | div_lo;
-    float freq = divider_to_freq(divider);
+    uint16_t freq_mhz = (freq_hi << 8) | freq_lo;
 
     const char *width_str;
     switch ((ctrl & CTRL_WIDTH_MASK) >> 1) {
@@ -132,8 +124,7 @@ static int print_status(libusb_device_handle *handle) {
     printf("  Control Register:   0x%02x\n", ctrl);
     printf("  Clock Mode:         %s\n", (ctrl & CTRL_CLOCK_MODE) ? "Master (FPGA generates)" : "Slave (external)");
     printf("  Counter Width:      %s\n", width_str);
-    printf("  Clock Divider:      %u (0x%04x)\n", divider, divider);
-    printf("  Master Clock Freq:  %.2f MHz\n", freq);
+    printf("  Master Clock Freq:  %u MHz\n", freq_mhz);
     printf("\nStatus Register:      0x%02x\n", status);
     printf("  Active Clock Mode:  %s\n", (status & STATUS_CLOCK_MODE) ? "Master" : "Slave");
     printf("  PLL Locked:         %s\n", (status & STATUS_PLL_LOCKED) ? "Yes" : "No");
@@ -227,18 +218,17 @@ int main(int argc, char *argv[]) {
             } else {
                 /* Master mode with specified frequency */
                 ctrl |= CTRL_CLOCK_MODE;
-                uint16_t divider = freq_to_divider(set_freq);
-                printf("Setting mode: Master at %.2f MHz (divider=%u, actual=%.2f MHz)\n",
-                       set_freq, divider, divider_to_freq(divider));
+                uint16_t freq_reg = freq_to_reg(set_freq);
+                printf("Setting mode: Master at %u MHz\n", freq_reg);
 
-                if (fpga_write_reg(handle, REG_DIV_LO, divider & 0xFF) != 0) {
-                    fprintf(stderr, "Failed to write divider low register\n");
+                if (fpga_write_reg(handle, REG_DIV_LO, freq_reg & 0xFF) != 0) {
+                    fprintf(stderr, "Failed to write frequency low register\n");
                     fx3_close(handle);
                     libusb_exit(ctx);
                     return 1;
                 }
-                if (fpga_write_reg(handle, REG_DIV_HI, (divider >> 8) & 0xFF) != 0) {
-                    fprintf(stderr, "Failed to write divider high register\n");
+                if (fpga_write_reg(handle, REG_DIV_HI, (freq_reg >> 8) & 0xFF) != 0) {
+                    fprintf(stderr, "Failed to write frequency high register\n");
                     fx3_close(handle);
                     libusb_exit(ctx);
                     return 1;

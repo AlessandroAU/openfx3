@@ -31,15 +31,6 @@
 // Configuration
 //-----------------------------------------------------------------------------
 
-/* Firmware buffer size - must match BENCHMARK_BUFFER_SIZE in benchmark.c */
-#define DMA_BUFFER_SIZE           32768
-
-/* Per-transfer buffer size (multiple of DMA_BUFFER_SIZE for counter validation) */
-#define SKIP_INITIAL_BYTES       (DMA_BUFFER_SIZE * 12)  /* Skip first 384KB (DMA pool size) */
-#define TRANSFER_SIZE            (DMA_BUFFER_SIZE * 16)  /* 512 KiB per transfer */
-#define TRANSFER_TIMEOUT_MS      1000
-#define ASYNC_TRANSFERS          16
-
 #define STATS_UPDATE_INTERVAL_MS 100
 #define ERROR_LOG_MAX            16
 
@@ -67,6 +58,9 @@ static int g_throughput_next = 0;
 static int g_throughput_count = 0;
 
 static atomic_uint g_transfer_count;
+
+/* DMA buffer size (queried from firmware) */
+static int g_dma_buffer_size = 0;
 
 /* Counter validation state */
 static uint32_t g_expected_counter = 0;
@@ -108,11 +102,11 @@ static void signal_handler(int sig) {
 //-----------------------------------------------------------------------------
 
 static void validate_buffer(const uint8_t *data, int length, unsigned transfer_num) {
-    /* Each DMA_BUFFER_SIZE chunk has a counter in the first 4 bytes */
-    int num_buffers = length / DMA_BUFFER_SIZE;
+    /* Each g_dma_buffer_size chunk has a counter in the first 4 bytes */
+    int num_buffers = length / g_dma_buffer_size;
 
     for (int i = 0; i < num_buffers; i++) {
-        const uint32_t *buf32 = (const uint32_t *)(data + i * DMA_BUFFER_SIZE);
+        const uint32_t *buf32 = (const uint32_t *)(data + i * g_dma_buffer_size);
         uint32_t counter = buf32[0];
 
         atomic_fetch_add(&g_buffers_checked, 1);
@@ -183,7 +177,7 @@ int main(int argc, char **argv) {
             printf("  -h, --help          Show this help\n");
             printf("\nMeasures maximum USB throughput from FX3 device.\n");
             printf("Benchmark mode sends pre-filled buffers without GPIF.\n");
-            printf("Validates incrementing counter in first 4 bytes of each %d-byte buffer.\n", DMA_BUFFER_SIZE);
+            printf("Validates incrementing counter in first 4 bytes of each DMA buffer.\n");
             printf("Press Ctrl+C to exit.\n");
             return 0;
         }
@@ -248,6 +242,19 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    /* Query acquisition parameters from firmware (DMA buffer config) */
+    struct fx3_acquisition_params acq_params;
+    if (fx3_acquisition_get_default_params(g_handle, &acq_params) != 0) {
+        fprintf(stderr, "Failed to get acquisition parameters from firmware\n");
+        fx3_stop_acquisition(g_handle);
+        fx3_close(g_handle);
+        libusb_exit(g_usb_ctx);
+        return 1;
+    }
+
+    /* Store DMA buffer size for counter validation */
+    g_dma_buffer_size = acq_params.dma_buffer_size;
+
     /* Wait for benchmark to become active (poll instead of fixed sleep) */
     if (fx3_wait_acquisition_ready(g_handle, 1000) != 0) {
         fprintf(stderr, "Timeout waiting for benchmark to start\n");
@@ -256,20 +263,20 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    printf("Transfer size: %d bytes (%d x %d-byte buffers)\n",
-           TRANSFER_SIZE, TRANSFER_SIZE / DMA_BUFFER_SIZE, DMA_BUFFER_SIZE);
+    printf("DMA config: %d buffers x %d bytes, transfer size: %d bytes\n",
+           acq_params.dma_buffer_count, acq_params.dma_buffer_size, acq_params.transfer_size);
     if (duration_sec > 0) {
         printf("Duration: %d seconds\n", duration_sec);
     }
     printf("\nPress Ctrl+C to stop.\n\n");
 
-    /* Create host-side acquisition session */
+    /* Create host-side acquisition session using firmware-derived parameters */
     ret = fx3_acquisition_create(g_handle, g_usb_ctx,
-                                 TRANSFER_SIZE,
-                                 ASYNC_TRANSFERS,
-                                 TRANSFER_TIMEOUT_MS,
+                                 acq_params.transfer_size,
+                                 acq_params.num_transfers,
+                                 acq_params.timeout_ms,
                                  0,
-                                 SKIP_INITIAL_BYTES,  /* skip_initial_bytes: one full transfer */
+                                 acq_params.skip_bytes,
                                  acquisition_callback,
                                  NULL,
                                  &g_session);

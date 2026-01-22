@@ -21,15 +21,11 @@
 #include <openfx3/openfx3.h>
 #include <openfx3/platform.h>
 
+#include "counter_validation.h"
+
 //-----------------------------------------------------------------------------
 // Configuration
 //-----------------------------------------------------------------------------
-#define DMA_BUFFER_SIZE          32768           /* FX3 DMA buffer size (must match firmware) */
-#define COUNTER_SIZE             4               /* 4-byte counter */
-#define TRANSFER_SIZE            (1024 * 512)   /* 512 KiB per transfer */
-#define SKIP_INITIAL_BYTES       (DMA_BUFFER_SIZE * 12)    /* Skip first 384KB (DMA pool size) */
-#define TRANSFER_TIMEOUT_MS      2000            /* Timeout for transfers */
-#define ASYNC_TRANSFERS          16               /* Number of transfers in flight */
 #define TARGET_BYTES_DEFAULT     (1024 * 1024 * 32)   /* Default: collect 32 MiB per frequency */
 #define NO_DATA_TIMEOUT_MS       500            /* Abort if no data received within this time */
 #define MAX_TEST_TIMEOUT_MS      30000           /* Maximum time per test (safety limit) */
@@ -40,7 +36,6 @@
 #define DEFAULT_FREQ_STOP        100
 #define DEFAULT_FREQ_STEP        5
 
-#define ERROR_LOG_MAX            8           /* Max counter errors to log details for */
 //#define ENABLE_COUNTER_DEBUG                /* Set to enable detailed counter error logging */
 
 //-----------------------------------------------------------------------------
@@ -99,88 +94,10 @@ static test_result_t g_results[MAX_FREQUENCIES];
 //-----------------------------------------------------------------------------
 
 static atomic_ullong g_bytes_received;
-
-/* Sequence validation state - only accessed from callback (serialized by libusb) */
-static uint32_t g_expected_counter = 0;
-static bool g_counter_initialized = false;
-static atomic_uint g_counter_errors;
-static atomic_ullong g_total_counters_checked;
 static atomic_uint g_transfer_count;
 
-typedef struct {
-    unsigned transfer_num;
-    int offset;
-    uint32_t expected;
-    uint32_t actual;
-} error_log_entry_t;
-
-static error_log_entry_t g_error_log[ERROR_LOG_MAX];
-static atomic_uint g_errors_logged;
-
-/* Validate every 32-bit value as a sequential counter (full stream validation) */
-static void validate_buffer_full(const uint8_t *data, int length, unsigned transfer_num)
-{
-    int num_counters = length / COUNTER_SIZE;
-    const uint32_t *counters = (const uint32_t *)data;
-
-    for (int i = 0; i < num_counters; i++) {
-        uint32_t counter = counters[i];
-        atomic_fetch_add(&g_total_counters_checked, 1);
-
-        if (!g_counter_initialized) {
-            g_expected_counter = counter;
-            g_counter_initialized = true;
-        }
-
-        if (counter != g_expected_counter) {
-            atomic_fetch_add(&g_counter_errors, 1);
-
-            unsigned logged = atomic_load(&g_errors_logged);
-            if (logged < ERROR_LOG_MAX) {
-                g_error_log[logged].transfer_num = transfer_num;
-                g_error_log[logged].offset = i * COUNTER_SIZE;
-                g_error_log[logged].expected = g_expected_counter;
-                g_error_log[logged].actual = counter;
-                atomic_fetch_add(&g_errors_logged, 1);
-            }
-
-            g_expected_counter = counter + 1;
-        } else {
-            g_expected_counter++;
-        }
-    }
-}
-
-/* Validate only the first 4-byte header of each DMA buffer */
-static void validate_buffer_headers(const uint8_t *data, int length, unsigned transfer_num)
-{
-    for (int offset = 0; offset + COUNTER_SIZE <= length; offset += DMA_BUFFER_SIZE) {
-        uint32_t counter = *(const uint32_t *)(data + offset);
-        atomic_fetch_add(&g_total_counters_checked, 1);
-
-        if (!g_counter_initialized) {
-            g_expected_counter = counter;
-            g_counter_initialized = true;
-        }
-
-        if (counter != g_expected_counter) {
-            atomic_fetch_add(&g_counter_errors, 1);
-
-            unsigned logged = atomic_load(&g_errors_logged);
-            if (logged < ERROR_LOG_MAX) {
-                g_error_log[logged].transfer_num = transfer_num;
-                g_error_log[logged].offset = offset;
-                g_error_log[logged].expected = g_expected_counter;
-                g_error_log[logged].actual = counter;
-                atomic_fetch_add(&g_errors_logged, 1);
-            }
-
-            g_expected_counter = counter + 1;
-        } else {
-            g_expected_counter++;
-        }
-    }
-}
+/* Counter validation state */
+static cv_state_t g_cv_state;
 
 static int acquisition_callback(const uint8_t *data, int length, void *user_data) {
     (void)user_data;
@@ -188,9 +105,9 @@ static int acquisition_callback(const uint8_t *data, int length, void *user_data
     unsigned transfer_num = atomic_fetch_add(&g_transfer_count, 1) + 1;
 
     if (g_validate_mode == 1) {
-        validate_buffer_full(data, length, transfer_num);
+        cv_validate_full(&g_cv_state, data, length, transfer_num);
     } else if (g_validate_mode == 2) {
-        validate_buffer_headers(data, length, transfer_num);
+        cv_validate_headers(&g_cv_state, data, length, transfer_num);
     }
 
     atomic_fetch_add(&g_bytes_received, (unsigned long long)length);
@@ -210,11 +127,6 @@ static test_result_t test_frequency(int freq_mhz, int bus_width) {
     /* Reset counters for this frequency test */
     atomic_store(&g_bytes_received, 0);
     atomic_store(&g_transfer_count, 0);
-    atomic_store(&g_counter_errors, 0);
-    atomic_store(&g_total_counters_checked, 0);
-    atomic_store(&g_errors_logged, 0);
-    g_expected_counter = 0;
-    g_counter_initialized = false;
 
     /* Start firmware-side acquisition */
     struct fx3_acq_config acq_config = {
@@ -223,12 +135,23 @@ static test_result_t test_frequency(int freq_mhz, int bus_width) {
         .internal_clk = 1,
         .clk_out = 1,
     };
-    
+
     int ret = fx3_start_acquisition(g_handle, freq_mhz, &acq_config);
     if (ret != 0) {
         result.error_msg = "Failed to start acquisition";
         return result;
     }
+
+    /* Query acquisition parameters from firmware */
+    struct fx3_acquisition_params acq_params;
+    if (fx3_acquisition_get_default_params(g_handle, &acq_params) != 0) {
+        result.error_msg = "Failed to get DMA config";
+        fx3_stop_acquisition(g_handle);
+        return result;
+    }
+
+    /* Initialize/reset counter validation with firmware's DMA buffer size */
+    cv_init(&g_cv_state, bus_width, acq_params.dma_buffer_size);
 
     /* Get actual bus frequency and clock config */
     struct fx3_acq_status acq_status;
@@ -247,14 +170,14 @@ static test_result_t test_frequency(int freq_mhz, int bus_width) {
         return result;
     }
 
-    /* Create host-side acquisition session */
+    /* Create host-side acquisition session using firmware-derived parameters */
     fx3_acquisition_session_t *session = NULL;
     ret = fx3_acquisition_create(g_handle, g_usb_ctx,
-                                 TRANSFER_SIZE,
-                                 ASYNC_TRANSFERS,
-                                 TRANSFER_TIMEOUT_MS,
+                                 acq_params.transfer_size,
+                                 acq_params.num_transfers,
+                                 acq_params.timeout_ms,
                                  0,  /* chunk_size: 0 = whole transfer */
-                                 SKIP_INITIAL_BYTES,  /* skip_initial_bytes: one full transfer */
+                                 acq_params.skip_bytes,
                                  acquisition_callback,
                                  NULL,
                                  &session);
@@ -298,8 +221,8 @@ static test_result_t test_frequency(int freq_mhz, int bus_width) {
         result.data_rate_mbps = (result.bytes_received / 1e6) / elapsed_sec;
     }
 
-    result.counter_errors = atomic_load(&g_counter_errors);
-    result.counters_checked = (unsigned long long)atomic_load(&g_total_counters_checked);
+    result.counter_errors = cv_get_error_count(&g_cv_state);
+    result.counters_checked = cv_get_counters_checked(&g_cv_state);
 
     struct fx3_drop_stats drop_stats;
     if (fx3_get_drop_stats(g_handle, &drop_stats) == 0) {
@@ -325,16 +248,16 @@ static test_result_t test_frequency(int freq_mhz, int bus_width) {
 
 #ifdef ENABLE_COUNTER_DEBUG
         /* Debug: print first few error entries */
-        unsigned errors_logged = atomic_load(&g_errors_logged);
+        unsigned errors_logged = cv_get_errors_logged(&g_cv_state);
         if (errors_logged > 0) {
             printf("  [DEBUG %d MHz] First errors:\n", freq_mhz);
             for (unsigned i = 0; i < errors_logged && i < 4; i++) {
                 printf("    xfer %u, offset %d: expected %u, got %u (gap %d)\n",
-                       g_error_log[i].transfer_num,
-                       g_error_log[i].offset,
-                       g_error_log[i].expected,
-                       g_error_log[i].actual,
-                       (int)(g_error_log[i].actual - g_error_log[i].expected));
+                       g_cv_state.error_log[i].transfer_num,
+                       g_cv_state.error_log[i].offset,
+                       g_cv_state.error_log[i].expected,
+                       g_cv_state.error_log[i].actual,
+                       (int)(g_cv_state.error_log[i].actual - g_cv_state.error_log[i].expected));
             }
         }
 #endif
