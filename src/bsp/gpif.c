@@ -248,10 +248,9 @@ void Fx3GpifPibStart(uint16_t clock_divisor_x2)
 
   Fx3WriteReg32(FX3_VIC_VEC_ADDRESS + (FX3_IRQ_GPIF_CORE<<2), Fx3GpifPibIsr);
   Fx3WriteReg32(FX3_PIB_INTR, Fx3ReadReg32(FX3_PIB_INTR));
-  /* Enable GPIF error, GPIF interrupt, and DLL lock loss interrupts */
+  /* Enable GPIF error, GPIF interrupt */
   Fx3WriteReg32(FX3_PIB_INTR_MASK, FX3_PIB_INTR_MASK_GPIF_ERR |
-		FX3_PIB_INTR_MASK_GPIF_INTERRUPT |
-		FX3_PIB_INTR_MASK_DLL_LOST_LOCK);
+		FX3_PIB_INTR_MASK_GPIF_INTERRUPT);
   Fx3WriteReg32(FX3_VIC_INT_ENABLE, (1UL << FX3_IRQ_GPIF_CORE));
 }
 
